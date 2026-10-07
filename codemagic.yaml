@@ -1,0 +1,74 @@
+# Codemagic configuration for native Android application
+# MedRad Study Squad (Kotlin, Jetpack Compose, Room Database, Firebase, AGP 9.1.1, Gradle 9.3.1)
+
+workflows:
+  android-release:
+    name: MedRad Study Squad Android Release
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      java: 21
+      android_signing:
+        - release_keystore
+
+    scripts:
+      - name: Set up environment
+        script: |
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > app/google-services.json 2>/dev/null || echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+          fi
+          gradle wrapper --gradle-version 9.3.1 --distribution-type bin
+          chmod +x ./gradlew
+
+      - name: Build Android Release APK
+        script: |
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+    artifacts:
+      - app/build/outputs/apk/release/*.apk
+      - app/build/outputs/mapping/release/mapping.txt
+
+    cache:
+      cache_paths:
+        - ~/.gradle/caches
+        - ~/.gradle/wrapper
+
+  android-debug:
+    name: MedRad Study Squad Android Debug
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      java: 21
+
+    scripts:
+      - name: Set up debug keystore & environment
+        script: |
+          keytool -genkeypair -v -keystore debug.keystore -storetype JKS \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias androiddebugkey -storepass android -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > app/google-services.json 2>/dev/null || echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+          fi
+          gradle wrapper --gradle-version 9.3.1 --distribution-type bin
+          chmod +x ./gradlew
+
+      - name: Build Android Debug APK
+        script: |
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+    artifacts:
+      - app/build/outputs/apk/debug/*.apk
+
+    cache:
+      cache_paths:
+        - ~/.gradle/caches
+        - ~/.gradle/wrapper

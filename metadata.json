@@ -1,0 +1,6 @@
+{
+  "name": "MedRad Study app",
+  "description": "Academic learning and CBT practice platform for university students in Nigeria.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
