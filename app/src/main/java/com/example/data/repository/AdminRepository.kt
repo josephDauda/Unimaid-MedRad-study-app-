@@ -93,6 +93,10 @@ class AdminRepository(private val database: AppDatabase) {
     )
   }
 
+  suspend fun deleteCourse(course: CourseEntity) = withContext(Dispatchers.IO) {
+    academicDao.deleteCourse(course)
+  }
+
   suspend fun addTopic(courseId: Long, name: String, orderIndex: Int): Long = withContext(Dispatchers.IO) {
     academicDao.insertTopic(TopicEntity(courseId = courseId, name = name, orderIndex = orderIndex))
   }
@@ -108,6 +112,10 @@ class AdminRepository(private val database: AppDatabase) {
 
   suspend fun deleteQuestion(question: QuestionEntity) = withContext(Dispatchers.IO) {
     questionDao.deleteQuestion(question)
+  }
+
+  suspend fun clearAllQuestions() = withContext(Dispatchers.IO) {
+    questionDao.clearAllQuestions()
   }
 
   // Exam Builder

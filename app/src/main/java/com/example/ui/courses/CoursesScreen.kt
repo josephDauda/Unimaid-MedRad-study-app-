@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -109,7 +110,7 @@ fun CoursesScreen(
   academicRepository: AcademicRepository,
   cloudSyncManager: com.example.data.sync.CloudSyncManager? = null,
   onNavigateBack: () -> Unit,
-  onStartCoursePractice: (courseId: Long) -> Unit
+  onStartCoursePractice: (courseId: Long, code: String, title: String) -> Unit
 ) {
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
@@ -151,6 +152,7 @@ fun CoursesScreen(
   }
 
   Scaffold(
+    contentWindowInsets = WindowInsets(0.dp),
     topBar = {
       TopAppBar(
         title = {
@@ -214,31 +216,31 @@ fun CoursesScreen(
       Surface(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+          .padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
       ) {
         Row(
-          modifier = Modifier.padding(12.dp),
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
           Icon(
             Icons.Default.School,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(20.dp)
           )
-          Spacer(modifier = Modifier.width(10.dp))
+          Spacer(modifier = Modifier.width(8.dp))
           Column {
             Text(
               text = user.university,
-              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+              style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp),
               color = MaterialTheme.colorScheme.onSurface
             )
             Text(
               text = "${user.faculty} • ${user.department}",
-              style = MaterialTheme.typography.labelSmall,
+              style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
           }
@@ -250,13 +252,13 @@ fun CoursesScreen(
         text = "Select Course Hub",
         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
         color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
       )
 
       LazyRow(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 12.dp, vertical = 4.dp),
+          .padding(horizontal = 12.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
       ) {
         items(courses) { course ->
@@ -271,7 +273,7 @@ fun CoursesScreen(
               width = if (isSelected) 1.5.dp else 1.dp,
               color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             ),
-            modifier = Modifier.height(54.dp)
+            modifier = Modifier.height(48.dp)
           ) {
             Row(
               modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -518,7 +520,7 @@ fun CoursesScreen(
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                     Button(
-                      onClick = { onStartCoursePractice(currentCourse.id) },
+                      onClick = { onStartCoursePractice(currentCourse.id, currentCourse.code, currentCourse.title) },
                       modifier = Modifier.fillMaxWidth().height(46.dp),
                       colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -599,7 +601,7 @@ fun CoursesScreen(
                           color = ProfessionalBlue
                         )
                         OutlinedButton(
-                          onClick = { onStartCoursePractice(currentCourse.id) },
+                          onClick = { onStartCoursePractice(currentCourse.id, currentCourse.code, currentCourse.title) },
                           shape = RoundedCornerShape(8.dp)
                         ) {
                           Text("Take Quiz")

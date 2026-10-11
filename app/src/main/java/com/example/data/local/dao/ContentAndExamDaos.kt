@@ -34,6 +34,9 @@ interface QuestionDao {
   @Query("SELECT * FROM questions WHERE id = :id LIMIT 1")
   suspend fun getQuestionById(id: Long): QuestionEntity?
 
+  @Query("SELECT * FROM questions WHERE id IN (:ids) AND isPublished = 1 ORDER BY id ASC")
+  suspend fun getQuestionsByIds(ids: List<Long>): List<QuestionEntity>
+
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun insertQuestion(question: QuestionEntity): Long
 
@@ -45,6 +48,9 @@ interface QuestionDao {
 
   @Delete
   suspend fun deleteQuestion(question: QuestionEntity)
+
+  @Query("DELETE FROM questions")
+  suspend fun clearAllQuestions()
 
   @Query("SELECT COUNT(*) FROM questions")
   suspend fun getTotalQuestionsCount(): Int

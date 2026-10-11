@@ -69,6 +69,7 @@ import com.example.data.local.entity.ExamEntity
 import com.example.data.local.entity.UserEntity
 import com.example.ui.components.MedicalRadiographyEmblem
 import com.example.ui.theme.BorderSubtle
+import com.example.ui.theme.getCardTheme
 import com.example.ui.theme.MedicalTeal
 import com.example.ui.theme.ProfessionalBlue
 import com.example.ui.theme.SuccessGreen
@@ -93,7 +94,8 @@ fun DashboardScreen(
   onNavigateToMaterials: () -> Unit,
   onNavigateToSubscription: () -> Unit,
   onNavigateToResults: (attemptId: Long) -> Unit,
-  onNavigateToCourses: () -> Unit
+  onNavigateToCourses: () -> Unit,
+  onStartPracticeAdvanced: (courseId: Long, questionCount: Int, customTitle: String?, customCode: String?, questionIds: List<Long>) -> Unit = { id, _, _, _, _ -> onStartPractice(id) }
 ) {
   LaunchedEffect(user.id) {
     dashboardViewModel.loadDashboard(user)
@@ -105,6 +107,10 @@ fun DashboardScreen(
   val announcements by dashboardViewModel.announcements.collectAsState()
   val isSyncing by dashboardViewModel.isSyncing.collectAsState()
   val dailySprint by dashboardViewModel.dailySprintConfig.collectAsState()
+  val practiceCard by dashboardViewModel.practiceCardConfig.collectAsState()
+  val mockCard by dashboardViewModel.mockCardConfig.collectAsState()
+  val globalCardStyle by dashboardViewModel.globalCardStyle.collectAsState()
+  val sprintTheme = getCardTheme(dailySprint.theme.ifBlank { globalCardStyle })
 
   val greeting = rememberGreeting()
   val firstName = user.fullName.split(" ").firstOrNull() ?: user.fullName
@@ -196,21 +202,26 @@ fun DashboardScreen(
       Card(
         modifier = Modifier
           .fillMaxWidth()
-          .clickable { onStartPractice(dailySprint.courseId) },
+          .clickable {
+            onStartPracticeAdvanced(
+              dailySprint.courseId,
+              dailySprint.questionCount,
+              dailySprint.title,
+              dailySprint.courseCode,
+              dailySprint.questionIds
+            )
+          },
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFE0E7FF)), // Soft modern lilac/indigo
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        colors = CardDefaults.cardColors(containerColor = sprintTheme.primaryColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        border = BorderStroke(1.dp, sprintTheme.accentColor.copy(alpha = 0.4f))
       ) {
         Box(
           modifier = Modifier
             .fillMaxWidth()
             .background(
               Brush.horizontalGradient(
-                colors = listOf(
-                  Color(0xFF312E81),
-                  Color(0xFF4338CA),
-                  Color(0xFF6366F1)
-                )
+                colors = sprintTheme.gradientColors
               )
             )
             .padding(20.dp)
@@ -223,13 +234,13 @@ fun DashboardScreen(
             Column(modifier = Modifier.weight(1f)) {
               Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = WarningAmber.copy(alpha = 0.25f),
-                border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.4f))
+                color = sprintTheme.accentColor.copy(alpha = 0.25f),
+                border = BorderStroke(1.dp, sprintTheme.accentColor.copy(alpha = 0.5f))
               ) {
                 Text(
                   text = dailySprint.badge,
                   style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                  color = WarningAmber,
+                  color = sprintTheme.accentColor,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
               }
@@ -248,7 +259,7 @@ fun DashboardScreen(
               Text(
                 text = dailySprint.subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFFE0E7FF)
+                color = Color.White.copy(alpha = 0.85f)
               )
 
               Spacer(modifier = Modifier.height(14.dp))
@@ -334,69 +345,150 @@ fun DashboardScreen(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        // Taller Left Card (Warm Amber): Active Department Course (RAD 101)
-        Surface(
-          modifier = Modifier
-            .weight(1f)
-            .height(190.dp)
-            .clickable { onStartPractice(1L) },
-          shape = RoundedCornerShape(20.dp),
-          color = Color(0xFFFEF3C7), // Warm soft amber
-          border = BorderStroke(1.dp, Color(0xFFFDE68A))
-        ) {
-          Column(
+        // Taller Left Card: Active Department Practice Course or "Coming Soon..."
+        if (practiceCard.isConfigured && practiceCard.courseId > 0L) {
+          Surface(
             modifier = Modifier
-              .fillMaxSize()
-              .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+              .weight(1f)
+              .height(190.dp)
+              .clickable {
+                onStartPracticeAdvanced(
+                  practiceCard.courseId,
+                  practiceCard.questionCount,
+                  practiceCard.courseTitle,
+                  practiceCard.courseCode,
+                  practiceCard.questionIds
+                )
+              },
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFFFEF3C7), // Warm soft amber
+            border = BorderStroke(1.dp, Color(0xFFFDE68A))
           ) {
-            Column {
-              Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFFF59E0B).copy(alpha = 0.2f)
-              ) {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+              verticalArrangement = Arrangement.SpaceBetween
+            ) {
+              Column {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = Color(0xFFF59E0B).copy(alpha = 0.2f)
+                ) {
+                  Text(
+                    text = practiceCard.courseCode.ifBlank { "RAD ${practiceCard.courseId}" },
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFFB45309),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                  text = "RAD 101",
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                  color = Color(0xFFB45309),
-                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  text = practiceCard.courseTitle.ifBlank { "Clinical Practice Questions" },
+                  style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                  color = Color(0xFF78350F),
+                  maxLines = 2
+                )
+                Text(
+                  text = "${practiceCard.questionCount} Questions",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = Color(0xFF92400E)
                 )
               }
-              Spacer(modifier = Modifier.height(8.dp))
-              Text(
-                text = "Radiation Physics & Safety",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color(0xFF78350F)
-              )
-              Text(
-                text = "15 Questions",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF92400E)
-              )
-            }
 
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              Text(
-                text = "Practice",
-                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                color = Color(0xFFB45309)
-              )
-              Surface(
-                shape = CircleShape,
-                color = Color(0xFFB45309),
-                modifier = Modifier.size(32.dp)
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
               ) {
-                Box(contentAlignment = Alignment.Center) {
-                  Icon(
-                    Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
+                Text(
+                  text = "Practice",
+                  style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                  color = Color(0xFFB45309)
+                )
+                Surface(
+                  shape = CircleShape,
+                  color = Color(0xFFB45309),
+                  modifier = Modifier.size(32.dp)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      Icons.Default.PlayArrow,
+                      contentDescription = null,
+                      tint = Color.White,
+                      modifier = Modifier.size(18.dp)
+                    )
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          // Professional Coming Soon... state
+          Surface(
+            modifier = Modifier
+              .weight(1f)
+              .height(190.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+          ) {
+            Column(
+              modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+              verticalArrangement = Arrangement.SpaceBetween
+            ) {
+              Column {
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                ) {
+                  Text(
+                    text = "PRACTICE CARD",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                   )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                  text = "Coming soon..",
+                  style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                  text = "New clinical questions and case scenarios will appear here once published.",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  maxLines = 3
+                )
+              }
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "Pending",
+                  style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Surface(
+                  shape = CircleShape,
+                  color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                  modifier = Modifier.size(32.dp)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      Icons.Default.Lock,
+                      contentDescription = "Coming Soon",
+                      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
                 }
               }
             }
@@ -408,45 +500,103 @@ fun DashboardScreen(
           modifier = Modifier.weight(1f),
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          // Card: Mock Exams (Soft Teal)
-          Surface(
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(90.dp)
-              .clickable {
-                val exam = activeExams.firstOrNull()
-                if (exam != null) onStartExam(exam) else onNavigateToCourses()
-              },
-            shape = RoundedCornerShape(18.dp),
-            color = Color(0xFFCCFBF1), // Soft teal
-            border = BorderStroke(1.dp, Color(0xFF99F6E4))
-          ) {
-            Row(
+          // Card: Mock Exams (Soft Teal or configured Course or Coming soon)
+          if (mockCard.isConfigured && mockCard.courseId > 0L) {
+            Surface(
               modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-              horizontalArrangement = Arrangement.SpaceBetween,
-              verticalAlignment = Alignment.CenterVertically
+                .fillMaxWidth()
+                .height(90.dp)
+                .clickable {
+                  val exam = activeExams.find { it.id == mockCard.examId }
+                    ?: activeExams.find { it.courseId == mockCard.courseId }
+                    ?: ExamEntity(
+                      id = mockCard.examId.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                      courseId = mockCard.courseId,
+                      title = mockCard.examTitle.ifBlank { "${mockCard.courseCode} Mock CBT" },
+                      description = "Official departmental timed CBT examination simulation.",
+                      durationMinutes = mockCard.durationMinutes,
+                      totalQuestions = mockCard.questionCount,
+                      isPublished = true
+                    )
+                  onStartExam(exam)
+                },
+              shape = RoundedCornerShape(18.dp),
+              color = Color(0xFFCCFBF1), // Soft teal
+              border = BorderStroke(1.dp, Color(0xFF99F6E4))
             ) {
-              Column(modifier = Modifier.weight(1f)) {
-                Text(
-                  text = "Mock CBT",
-                  style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                  color = Color(0xFF0F766E)
-                )
-                Text(
-                  text = "${activeExams.size} Timed Exam",
-                  style = MaterialTheme.typography.labelSmall,
-                  color = Color(0xFF115E59)
-                )
-              }
-              Surface(
-                shape = CircleShape,
-                color = Color(0xFF0F766E),
-                modifier = Modifier.size(28.dp)
+              Row(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
               ) {
-                Box(contentAlignment = Alignment.Center) {
-                  Icon(Icons.Default.Assignment, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = mockCard.examTitle.ifBlank { "Mock CBT" },
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFF0F766E),
+                    maxLines = 1
+                  )
+                  Text(
+                    text = "${mockCard.courseCode} • ${mockCard.durationMinutes}m Timed",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF115E59)
+                  )
+                }
+                Surface(
+                  shape = CircleShape,
+                  color = Color(0xFF0F766E),
+                  modifier = Modifier.size(28.dp)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Assignment, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                  }
+                }
+              }
+            }
+          } else {
+            // Professional Coming Soon... state for Mock CBT
+            Surface(
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(90.dp),
+              shape = RoundedCornerShape(18.dp),
+              color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = "Mock CBT",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                  Text(
+                    text = "Coming soon..",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                }
+                Surface(
+                  shape = CircleShape,
+                  color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                  modifier = Modifier.size(28.dp)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      Icons.Default.Lock,
+                      contentDescription = "Coming Soon",
+                      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                      modifier = Modifier.size(14.dp)
+                    )
+                  }
                 }
               }
             }

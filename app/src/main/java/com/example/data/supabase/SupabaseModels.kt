@@ -21,8 +21,8 @@ data class SupabaseProfile(
 
 @JsonClass(generateAdapter = true)
 data class SupabaseCourse(
-  val id: Long,
-  @Json(name = "department_id") val departmentId: Long? = 1L,
+  val id: Any, // Can be Long, Int, or UUID String from Supabase
+  @Json(name = "department_id") val departmentId: Any? = 1L,
   val code: String,
   val title: String,
   val level: String? = null,
@@ -34,9 +34,9 @@ data class SupabaseCourse(
 
 @JsonClass(generateAdapter = true)
 data class SupabaseStudyMaterial(
-  val id: Long,
-  @Json(name = "course_id") val courseId: Long,
-  @Json(name = "topic_id") val topicId: Long? = null,
+  val id: Any, // Can be Long, Int, or UUID String from Supabase
+  @Json(name = "course_id") val courseId: Any,
+  @Json(name = "topic_id") val topicId: Any? = null,
   val title: String,
   val description: String? = null,
   @Json(name = "content_type") val contentType: String = "Lecture Note",
@@ -49,8 +49,8 @@ data class SupabaseStudyMaterial(
 
 @JsonClass(generateAdapter = true)
 data class SupabaseCourseLibrary(
-  val id: Long,
-  @Json(name = "course_id") val courseId: Long,
+  val id: Any, // Can be Long, Int, or UUID String from Supabase
+  @Json(name = "course_id") val courseId: Any,
   @Json(name = "course_code") val courseCode: String? = null,
   val name: String,
   val description: String? = null,
@@ -74,8 +74,8 @@ data class SupabaseAnnouncement(
 
 @JsonClass(generateAdapter = true)
 data class SupabaseExam(
-  val id: Long,
-  @Json(name = "course_id") val courseId: Long,
+  val id: Any, // Can be Long, Int, or UUID String from Supabase
+  @Json(name = "course_id") val courseId: Any,
   val title: String,
   val description: String? = null,
   @Json(name = "duration_minutes") val durationMinutes: Int = 30,
@@ -87,15 +87,22 @@ data class SupabaseExam(
 
 @JsonClass(generateAdapter = true)
 data class SupabaseQuestion(
-  val id: Long,
-  @Json(name = "course_id") val courseId: Long,
-  @Json(name = "topic_id") val topicId: Long? = null,
+  val id: Any, // Can be Long, Int, or UUID String from Supabase
+  @Json(name = "course_id") val courseId: Any,
+  @Json(name = "topic_id") val topicId: Any? = null,
   @Json(name = "question_text") val questionText: String,
   @Json(name = "option_a") val optionA: String,
   @Json(name = "option_b") val optionB: String,
   @Json(name = "option_c") val optionC: String,
   @Json(name = "option_d") val optionD: String,
+  @Json(name = "correct_answer") val correctAnswer: String? = "A",
+  val explanation: String? = "",
   val difficulty: String = "MEDIUM",
+  @Json(name = "question_type") val questionType: String? = "MULTIPLE_CHOICE",
+  @Json(name = "assessment_title") val assessmentTitle: String? = "Continuous Assessment",
+  val marks: Int? = 1,
+  @Json(name = "time_limit_seconds") val timeLimitSeconds: Int? = 60,
+  @Json(name = "image_url") val imageUrl: String? = null,
   @Json(name = "is_premium") val isPremium: Boolean = false,
   @Json(name = "is_published") val isPublished: Boolean = true,
   @Json(name = "is_demo") val isDemo: Boolean = false,
@@ -106,7 +113,7 @@ data class SupabaseQuestion(
 data class SupabaseExamAttempt(
   val id: String? = null,
   @Json(name = "user_id") val userId: String,
-  @Json(name = "course_id") val courseId: Long,
+  @Json(name = "course_id") val courseId: Any,
   val score: Int,
   @Json(name = "total_questions") val totalQuestions: Int,
   @Json(name = "time_spent_seconds") val timeSpentSeconds: Int,
@@ -144,9 +151,24 @@ data class SupabaseAppConfig(
   @Json(name = "sprint_title") val sprintTitle: String? = "Radiography Challenge",
   @Json(name = "sprint_subtitle") val sprintSubtitle: String? = "15 practice questions ready for your level",
   @Json(name = "sprint_badge") val sprintBadge: String? = "DAILY CBT SPRINT",
-  @Json(name = "sprint_course_id") val sprintCourseId: Long? = 1L,
+  @Json(name = "sprint_course_id") val sprintCourseId: Any? = 1L,
+  @Json(name = "sprint_course_code") val sprintCourseCode: String? = "RAD 101",
   @Json(name = "sprint_question_count") val sprintQuestionCount: Int? = 15,
   @Json(name = "sprint_active_students") val sprintActiveStudents: String? = "38 students active",
+  @Json(name = "sprint_theme") val sprintTheme: String? = "NAVY_GOLD",
+  @Json(name = "practice_card_course_id") val practiceCardCourseId: Any? = 1L,
+  @Json(name = "practice_card_course_code") val practiceCardCourseCode: String? = "RAD 101",
+  @Json(name = "practice_card_course_title") val practiceCardCourseTitle: String? = "Radiation Physics & Safety",
+  @Json(name = "practice_card_question_count") val practiceCardQuestionCount: Int? = 15,
+  @Json(name = "practice_card_is_active") val practiceCardIsActive: Boolean? = true,
+  @Json(name = "mock_card_course_id") val mockCardCourseId: Any? = 1L,
+  @Json(name = "mock_card_course_code") val mockCardCourseCode: String? = "RAD 101",
+  @Json(name = "mock_card_course_title") val mockCardCourseTitle: String? = "Radiation Physics & Safety",
+  @Json(name = "mock_card_exam_id") val mockCardExamId: Any? = 0L,
+  @Json(name = "mock_card_exam_title") val mockCardExamTitle: String? = "RAD 101 Mock Exam",
+  @Json(name = "mock_card_question_count") val mockCardQuestionCount: Int? = 15,
+  @Json(name = "mock_card_duration_minutes") val mockCardDurationMinutes: Int? = 30,
+  @Json(name = "mock_card_is_active") val mockCardIsActive: Boolean? = true,
   @Json(name = "updated_at") val updatedAt: String? = null
 )
 

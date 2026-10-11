@@ -494,21 +494,6 @@ fun QuestionView(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
           )
         }
-
-        if (question.isDemo) {
-          Spacer(modifier = Modifier.width(6.dp))
-          Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = Color(0xFFFEF3C7),
-            contentColor = Color(0xFF92400E)
-          ) {
-            Text(
-              text = "Demo Question",
-              style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-            )
-          }
-        }
       }
 
       IconButton(onClick = onToggleMark) {

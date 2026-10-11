@@ -77,6 +77,12 @@ class CbtRepository(
     }
   }
 
+  suspend fun getQuestionsByIds(ids: List<Long>): List<QuestionEntity> {
+    return withContext(Dispatchers.IO) {
+      if (ids.isEmpty()) emptyList() else questionDao.getQuestionsByIds(ids)
+    }
+  }
+
   suspend fun getPracticeQuestions(courseId: Long, limit: Int = 15): List<QuestionEntity> {
     return withContext(Dispatchers.IO) {
       val questions = questionDao.getPublishedQuestionsForCourseList(courseId)

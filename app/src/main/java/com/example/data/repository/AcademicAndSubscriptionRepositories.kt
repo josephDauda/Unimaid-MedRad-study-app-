@@ -35,6 +35,7 @@ class AcademicRepository(private val database: AppDatabase) {
   fun getTopicsByCourse(courseId: Long): Flow<List<TopicEntity>> = academicDao.getTopicsByCourse(courseId)
 
   fun getExamsForCourse(courseId: Long): Flow<List<ExamEntity>> = examDao.getExamsForCourse(courseId)
+  fun getAllExams(): Flow<List<ExamEntity>> = examDao.getAllExams()
   fun getPublishedExams(): Flow<List<ExamEntity>> = examDao.getPublishedExams()
   suspend fun getExamById(id: Long): ExamEntity? = examDao.getExamById(id)
 

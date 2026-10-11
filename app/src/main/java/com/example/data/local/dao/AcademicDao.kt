@@ -35,6 +35,9 @@ interface AcademicDao {
   @Query("SELECT * FROM faculties WHERE universityId = :universityId ORDER BY name ASC")
   fun getFacultiesByUniversity(universityId: Long): Flow<List<FacultyEntity>>
 
+  @Query("SELECT * FROM faculties WHERE universityId = :universityId ORDER BY name ASC")
+  suspend fun getFacultiesListByUniversity(universityId: Long): List<FacultyEntity>
+
   @Query("SELECT * FROM faculties ORDER BY name ASC")
   fun getAllFaculties(): Flow<List<FacultyEntity>>
 
@@ -50,6 +53,9 @@ interface AcademicDao {
   // Departments
   @Query("SELECT * FROM departments WHERE facultyId = :facultyId ORDER BY name ASC")
   fun getDepartmentsByFaculty(facultyId: Long): Flow<List<DepartmentEntity>>
+
+  @Query("SELECT * FROM departments WHERE facultyId = :facultyId ORDER BY name ASC")
+  suspend fun getDepartmentsListByFaculty(facultyId: Long): List<DepartmentEntity>
 
   @Query("SELECT * FROM departments ORDER BY name ASC")
   fun getAllDepartments(): Flow<List<DepartmentEntity>>

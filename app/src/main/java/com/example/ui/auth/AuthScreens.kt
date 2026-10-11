@@ -175,7 +175,6 @@ fun LoginScreen(
   var password by remember { mutableStateOf("") }
   var passwordVisible by remember { mutableStateOf(false) }
   var showResetDialog by remember { mutableStateOf(false) }
-  var showOAuthConfigDialog by remember { mutableStateOf(false) }
   var showEmailPasswordFields by remember { mutableStateOf(false) }
 
   // Inline Validation States
@@ -281,71 +280,11 @@ fun LoginScreen(
 
           Spacer(modifier = Modifier.height(18.dp))
 
-          // 1. PRIMARY LOGIN METHOD: "Continue with Google"
-          Button(
-            onClick = {
-              authViewModel.startGoogleOAuth(context)
-            },
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(52.dp)
-              .testTag("continue_with_google_button"),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.surfaceVariant,
-              contentColor = MaterialTheme.colorScheme.onSurface
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-            enabled = authState !is UiState.Loading
-          ) {
-            GoogleEmblem(size = 22.dp)
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-              text = "Continue with Google",
-              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-              color = MaterialTheme.colorScheme.onSurface
-            )
-          }
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Icon(Icons.Outlined.Security, contentDescription = null, tint = MedicalTeal, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              text = "Supabase Auth with Google OAuth • No password stored",
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(
-              onClick = { showOAuthConfigDialog = true },
-              modifier = Modifier.size(24.dp)
-            ) {
-              Icon(Icons.Outlined.Info, contentDescription = "OAuth Setup Info", tint = ProfessionalBlue, modifier = Modifier.size(16.dp))
-            }
-          }
-
-          Spacer(modifier = Modifier.height(16.dp))
-
-          // Divider
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-            Text(
-              text = "OR EMAIL / ADMIN",
-              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.padding(horizontal = 10.dp)
-            )
-            HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-          }
+          Text(
+            text = "Enter your academic email or credentials to access your CBT tests and study packs.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
 
           Spacer(modifier = Modifier.height(16.dp))
 
@@ -518,80 +457,6 @@ fun LoginScreen(
     }
   }
 
-  // Google OAuth Configuration & Architecture Information Dialog
-  if (showOAuthConfigDialog) {
-    AlertDialog(
-      onDismissRequest = { showOAuthConfigDialog = false },
-      icon = {
-        GoogleEmblem(size = 32.dp)
-      },
-      title = {
-        Text(
-          "Google OAuth Configuration",
-          style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-        )
-      },
-      text = {
-        Column(modifier = Modifier.fillMaxWidth()) {
-          Text(
-            text = "MedRad uses Supabase Auth with Google OAuth for enterprise academic authentication. Passwords are never requested or stored.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-          )
-          Spacer(modifier = Modifier.height(12.dp))
-          Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-          ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-              Text(
-                "Supabase Cloud Project: zvmiquntlxmiotlfpumc",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
-              )
-              Text(
-                "Auth Callback: medrad://auth/callback",
-                style = MaterialTheme.typography.labelSmall,
-                color = ProfessionalBlue
-              )
-              Text(
-                "Provider: Google (OAuth 2.0 Client ID)",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-              )
-              Text(
-                "Role Model: Verified from Supabase profiles table",
-                style = MaterialTheme.typography.labelSmall,
-                color = SuccessGreen
-              )
-            }
-          }
-          Spacer(modifier = Modifier.height(10.dp))
-          Text(
-            text = "When you click 'Continue with Google', your browser opens Google's official sign-in page. Upon completion, Google redirects directly back to MedRad to securely establish your Supabase session.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-          )
-        }
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            showOAuthConfigDialog = false
-            authViewModel.startGoogleOAuth(context)
-          }
-        ) {
-          Text("Sign In with Google")
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { showOAuthConfigDialog = false }) {
-          Text("Close")
-        }
-      }
-    )
-  }
-
   // Password Reset Dialog
   if (showResetDialog) {
     PasswordResetModal(
@@ -741,46 +606,13 @@ fun RegisterScreen(
             .fillMaxWidth()
             .padding(22.dp)
         ) {
-          // Google Quick Sign-Up
-          Button(
-            onClick = { authViewModel.startGoogleOAuth(context) },
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(50.dp)
-              .testTag("register_continue_with_google_button"),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-              containerColor = MaterialTheme.colorScheme.surfaceVariant,
-              contentColor = MaterialTheme.colorScheme.onSurface
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-          ) {
-            GoogleEmblem(size = 20.dp)
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-              text = "Sign Up with Google",
-              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-              color = MaterialTheme.colorScheme.onSurface
-            )
-          }
+          Text(
+            text = "Create your academic student profile to access CBT tests and learning resources.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
 
-          Spacer(modifier = Modifier.height(14.dp))
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-            Text(
-              text = "OR FILL FORM",
-              style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              modifier = Modifier.padding(horizontal = 10.dp)
-            )
-            HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
+          Spacer(modifier = Modifier.height(16.dp))
 
           // Full Name with gray hint placeholder per instructions: e.g. Joseph Dauda
           OutlinedTextField(

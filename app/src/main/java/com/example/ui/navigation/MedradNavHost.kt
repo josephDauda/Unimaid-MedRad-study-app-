@@ -142,7 +142,7 @@ fun MedradNavHost(
       container.cloudSyncManager
     )
   }
-  val cbtViewModel = remember { CbtViewModel(container.cbtRepository) }
+  val cbtViewModel = remember { CbtViewModel(container.cbtRepository, container.academicRepository) }
   val resultsViewModel = remember { ResultsViewModel(container.cbtRepository, container.academicRepository) }
   val subscriptionViewModel = remember { SubscriptionViewModel(container.subscriptionRepository, container.authRepository) }
   val adminViewModel = remember { AdminViewModel(container.adminRepository, container.academicRepository, container.cloudSyncManager) }
@@ -328,6 +328,10 @@ fun MedradNavHost(
                     cbtViewModel.startPractice(courseId, user)
                     navigateTo(ScreenRoute.CBT_SESSION)
                   },
+                  onStartPracticeAdvanced = { courseId, count, title, code, qIds ->
+                    cbtViewModel.startPractice(courseId, user, count, title, code, qIds)
+                    navigateTo(ScreenRoute.CBT_SESSION)
+                  },
                   onStartExam = { exam ->
                     cbtViewModel.startMockExam(exam, user)
                     navigateTo(ScreenRoute.CBT_SESSION)
@@ -345,8 +349,8 @@ fun MedradNavHost(
                   academicRepository = container.academicRepository,
                   cloudSyncManager = container.cloudSyncManager,
                   onNavigateBack = { popBackStack() },
-                  onStartCoursePractice = { courseId ->
-                    cbtViewModel.startPractice(courseId, user)
+                  onStartCoursePractice = { courseId, code, title ->
+                    cbtViewModel.startPractice(courseId, user, customTitle = title, customCode = code)
                     navigateTo(ScreenRoute.CBT_SESSION)
                   }
                 )
@@ -498,7 +502,8 @@ fun MainAuthenticatedScaffold(
       // Mobile Layout: Integrated Clean Header + Content + Modern Floating Dock (Adapts to Light & Dark)
       Scaffold(
         topBar = {
-          Surface(
+          if (currentRoute == ScreenRoute.DASHBOARD) {
+            Surface(
             color = MaterialTheme.colorScheme.background,
             border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
             modifier = Modifier.fillMaxWidth()
@@ -600,7 +605,8 @@ fun MainAuthenticatedScaffold(
               }
             }
           }
-        },
+        }
+      },
         bottomBar = {
           // Floating Adaptive Dock Bar (No dark/brown heavy block; adapts cleanly to light and dark)
           Surface(
@@ -658,7 +664,10 @@ fun MainAuthenticatedScaffold(
         Box(
           modifier = Modifier
             .fillMaxSize()
-            .padding(innerPadding)
+            .padding(
+              top = if (currentRoute == ScreenRoute.DASHBOARD) innerPadding.calculateTopPadding() else 0.dp,
+              bottom = innerPadding.calculateBottomPadding()
+            )
         ) {
           content()
         }

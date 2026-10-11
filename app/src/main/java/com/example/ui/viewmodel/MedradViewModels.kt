@@ -208,6 +208,9 @@ class DashboardViewModel(
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
   val dailySprintConfig = cloudSyncManager?.dailySprintConfig ?: MutableStateFlow(com.example.data.sync.DailyCbtSprintConfig())
+  val practiceCardConfig = cloudSyncManager?.practiceCardConfig ?: MutableStateFlow(com.example.data.sync.PracticeCardConfig())
+  val mockCardConfig = cloudSyncManager?.mockCardConfig ?: MutableStateFlow(com.example.data.sync.MockCardConfig())
+  val globalCardStyle = cloudSyncManager?.globalCardStyle ?: MutableStateFlow("NAVY_GOLD")
 
   fun loadDashboard(user: UserEntity) {
     viewModelScope.launch {
@@ -256,7 +259,14 @@ class CbtViewModel(
 
   private var timerJob: Job? = null
 
-  fun startPractice(courseId: Long, user: UserEntity, customTitle: String? = null, customCode: String? = null) {
+  fun startPractice(
+    courseId: Long,
+    user: UserEntity,
+    questionCount: Int = 15,
+    customTitle: String? = null,
+    customCode: String? = null,
+    specificQuestionIds: List<Long> = emptyList()
+  ) {
     viewModelScope.launch {
       _sessionState.value = CbtSessionState(isLoading = true)
       val remaining = if (user.isPremium || user.role == "ADMIN") 9999 else cbtRepository.getRemainingAllowance(user)
@@ -270,13 +280,35 @@ class CbtViewModel(
       }
 
       val course = academicRepository?.getCourseById(courseId)
-      val code = customCode ?: course?.code ?: "RAD $courseId"
-      val title = customTitle ?: course?.title ?: "Radiography Course"
+      val code = if (!customCode.isNullOrBlank() && !customCode.contains(courseId.toString())) {
+        customCode
+      } else {
+        course?.code ?: "RAD 101"
+      }
+      val title = if (!customTitle.isNullOrBlank() && !customTitle.contains(courseId.toString())) {
+        customTitle
+      } else {
+        course?.title ?: "Medical Radiography"
+      }
 
-      val questions = cbtRepository.getPracticeQuestions(courseId, 15)
+      val questions = if (specificQuestionIds.isNotEmpty()) {
+        val specific = cbtRepository.getQuestionsByIds(specificQuestionIds)
+        if (specific.isNotEmpty()) specific else cbtRepository.getPracticeQuestions(courseId, questionCount)
+      } else {
+        cbtRepository.getPracticeQuestions(courseId, questionCount)
+      }
+
+      val displayExamTitle = if (course != null) {
+        "${course.code} — ${course.title}"
+      } else if (!customTitle.isNullOrBlank() && !customCode.isNullOrBlank()) {
+        "$customCode — $customTitle"
+      } else {
+        "$code — $title"
+      }
+
       _sessionState.value = CbtSessionState(
         isExamMode = false,
-        examTitle = "$code Daily Practice",
+        examTitle = displayExamTitle,
         courseTitle = "$code — $title",
         questions = questions,
         currentIndex = 0,
@@ -292,13 +324,15 @@ class CbtViewModel(
       val durationSecs = exam.durationMinutes * 60
       val questions = cbtRepository.getExamQuestions(exam.courseId, exam.totalQuestions)
       val course = academicRepository?.getCourseById(exam.courseId)
-      val code = course?.code ?: "RAD ${exam.courseId}"
+      val code = course?.code ?: "RAD 101"
       val title = course?.title ?: "Medical Radiography"
+
+      val displayExamTitle = if (exam.title.isNotBlank()) exam.title else "$code — $title Mock Exam"
 
       _sessionState.value = CbtSessionState(
         isExamMode = true,
         examId = exam.id,
-        examTitle = exam.title,
+        examTitle = displayExamTitle,
         courseTitle = "$code — $title",
         questions = questions,
         currentIndex = 0,
@@ -530,7 +564,7 @@ class AdminViewModel(
   val allQuestions = academicRepository.getAllQuestions()
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-  val allExams = academicRepository.getExamsForCourse(1L)
+  val allExams = academicRepository.getAllExams()
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
   val allMaterials = academicRepository.getAllMaterials()
@@ -558,10 +592,26 @@ class AdminViewModel(
   val aboutAppContent = cloudSyncManager?.aboutAppContent ?: MutableStateFlow(com.example.data.sync.AboutAppContent())
   val studentFeedbackList = cloudSyncManager?.studentFeedbackList ?: MutableStateFlow(emptyList())
   val dailySprintConfig = cloudSyncManager?.dailySprintConfig ?: MutableStateFlow(com.example.data.sync.DailyCbtSprintConfig())
+  val practiceCardConfig = cloudSyncManager?.practiceCardConfig ?: MutableStateFlow(com.example.data.sync.PracticeCardConfig())
+  val mockCardConfig = cloudSyncManager?.mockCardConfig ?: MutableStateFlow(com.example.data.sync.MockCardConfig())
 
   fun updateDailySprint(config: com.example.data.sync.DailyCbtSprintConfig, onDone: () -> Unit = {}) {
     viewModelScope.launch {
       cloudSyncManager?.updateDailySprintConfig(config)
+      onDone()
+    }
+  }
+
+  fun updatePracticeCard(config: com.example.data.sync.PracticeCardConfig, onDone: () -> Unit = {}) {
+    viewModelScope.launch {
+      cloudSyncManager?.updatePracticeCardConfig(config)
+      onDone()
+    }
+  }
+
+  fun updateMockCard(config: com.example.data.sync.MockCardConfig, onDone: () -> Unit = {}) {
+    viewModelScope.launch {
+      cloudSyncManager?.updateMockCardConfig(config)
       onDone()
     }
   }
@@ -642,6 +692,14 @@ class AdminViewModel(
     }
   }
 
+  fun deleteCourse(course: CourseEntity) {
+    viewModelScope.launch {
+      adminRepository.deleteCourse(course)
+      cloudSyncManager?.deleteCourseCloud(course.id)
+      loadStats()
+    }
+  }
+
   fun createTopic(courseId: Long, name: String, onDone: () -> Unit) {
     viewModelScope.launch {
       adminRepository.addTopic(courseId, name, 1)
@@ -666,6 +724,7 @@ class AdminViewModel(
     assessmentTitle: String = "General Practice",
     marks: Int = 1,
     timeLimitSeconds: Int = 60,
+    publishTarget: String = "COURSE_BANK",
     onDone: () -> Unit
   ) {
     viewModelScope.launch {
@@ -689,7 +748,57 @@ class AdminViewModel(
         timeLimitSeconds = timeLimitSeconds
       )
       val id = adminRepository.saveQuestion(q)
-      cloudSyncManager?.broadcastQuestion(q.copy(id = id))
+      val savedQuestion = q.copy(id = id)
+      cloudSyncManager?.broadcastQuestion(savedQuestion)
+
+      val course = academicRepository.getCourseById(courseId)
+      val courseCode = course?.code ?: "RAD 101"
+      val courseTitle = course?.title ?: "Medical Radiography"
+
+      if (publishTarget == "DAILY_SPRINT" || publishTarget == "ALL_SECTIONS") {
+        val curSprint = dailySprintConfig.value
+        val updatedIds = (curSprint.questionIds + id).distinct()
+        val updatedSprint = curSprint.copy(
+          courseId = courseId,
+          courseCode = courseCode,
+          title = if (assessmentTitle.isNotBlank()) assessmentTitle else "$courseCode Daily CBT Sprint",
+          subtitle = "${updatedIds.size} High-Yield Questions • $courseTitle",
+          questionCount = updatedIds.size,
+          questionIds = updatedIds
+        )
+        cloudSyncManager?.updateDailySprintConfig(updatedSprint)
+      }
+
+      if (publishTarget == "PRACTICE_CARD" || publishTarget == "ALL_SECTIONS") {
+        val curPractice = practiceCardConfig.value
+        val updatedIds = (curPractice.questionIds + id).distinct()
+        val updatedPractice = curPractice.copy(
+          isConfigured = true,
+          courseId = courseId,
+          courseCode = courseCode,
+          courseTitle = if (assessmentTitle.isNotBlank()) assessmentTitle else courseTitle,
+          questionCount = updatedIds.size,
+          questionIds = updatedIds
+        )
+        cloudSyncManager?.updatePracticeCardConfig(updatedPractice)
+      }
+
+      if (publishTarget == "MOCK_EXAM" || publishTarget == "ALL_SECTIONS") {
+        val curMock = mockCardConfig.value
+        val updatedIds = (curMock.questionIds + id).distinct()
+        val updatedMock = curMock.copy(
+          isConfigured = true,
+          courseId = courseId,
+          courseCode = courseCode,
+          courseTitle = courseTitle,
+          examTitle = if (assessmentTitle.isNotBlank()) assessmentTitle else "$courseCode Mock CBT Exam",
+          questionCount = updatedIds.size,
+          durationMinutes = 30,
+          questionIds = updatedIds
+        )
+        cloudSyncManager?.updateMockCardConfig(updatedMock)
+      }
+
       loadStats()
       onDone()
     }
@@ -699,6 +808,13 @@ class AdminViewModel(
     viewModelScope.launch {
       adminRepository.deleteQuestion(q)
       cloudSyncManager?.deleteQuestionCloud(q.id)
+      loadStats()
+    }
+  }
+
+  fun clearAllQuestions() {
+    viewModelScope.launch {
+      adminRepository.clearAllQuestions()
       loadStats()
     }
   }

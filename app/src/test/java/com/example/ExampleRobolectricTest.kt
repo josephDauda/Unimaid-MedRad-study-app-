@@ -344,6 +344,24 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val container = com.example.data.MedradAppContainer.getInstance(context)
 
+    // Ensure a practice question exists in Room for resilience check
+    val testQuestion = com.example.data.local.entity.QuestionEntity(
+      courseId = 1L,
+      topicId = 1L,
+      questionText = "What is the primary function of aluminum filtration in diagnostic radiology?",
+      optionA = "Increase patient skin entrance dose",
+      optionB = "Absorb low-energy non-penetrating photons",
+      optionC = "Magnify image resolution",
+      optionD = "Increase scatter production",
+      correctAnswer = "B",
+      explanation = "Filtration selectively removes low-energy photons, hardening the beam.",
+      difficulty = "Medium",
+      isPremium = false,
+      isPublished = true,
+      isDemo = false
+    )
+    container.database.questionDao().insertQuestion(testQuestion)
+
     // 1. Verify courses exist offline in Room
     val courses = container.database.academicDao().getCoursesList()
     org.junit.Assert.assertTrue("Offline database must provide cached courses", courses.isNotEmpty())
@@ -481,6 +499,25 @@ class ExampleRobolectricTest {
     val container = com.example.data.MedradAppContainer.getInstance(context)
     val cbtRepo = container.cbtRepository
 
+    // Insert a verified course question
+    container.database.questionDao().insertQuestion(
+      com.example.data.local.entity.QuestionEntity(
+        courseId = 1L,
+        topicId = 1L,
+        questionText = "Which SI unit is used for absorbed radiation dose?",
+        optionA = "Gray",
+        optionB = "Sievert",
+        optionC = "Roentgen",
+        optionD = "Becquerel",
+        correctAnswer = "A",
+        explanation = "The Gray (Gy) is the SI unit of absorbed dose.",
+        difficulty = "Easy",
+        isPremium = false,
+        isPublished = true,
+        isDemo = false
+      )
+    )
+
     // Valid course
     val questions = cbtRepo.getExamQuestions(1L, 5)
     org.junit.Assert.assertTrue("Should retrieve questions for course 1", questions.isNotEmpty())
@@ -592,5 +629,43 @@ class ExampleRobolectricTest {
     val savedExam = container.cbtRepository.getExamById(777L)
     org.junit.Assert.assertNotNull("Realtime exam must be inserted into Room database", savedExam)
     assertEquals("RAD 401 Mock CBT Exam", savedExam?.title)
+  }
+
+  @Test
+  fun `TEST S - Supabase UUID to Long conversion and model deserialization`() {
+    val uuidCourse = "4393642a-6eb7-459b-be42-0f353b7e25fe"
+    val convertedId = com.example.data.supabase.FlexibleIdHelper.toPositiveLong(uuidCourse)
+    org.junit.Assert.assertTrue("Converted UUID ID must be positive", convertedId > 0L)
+
+    val client = com.example.data.supabase.SupabaseClient(ApplicationProvider.getApplicationContext())
+    val sampleCourseJson = """
+      {
+        "id": "4393642a-6eb7-459b-be42-0f353b7e25fe",
+        "department_id": 1,
+        "code": "RAD 201",
+        "title": "Radiographic Technique I",
+        "level": "200 Level",
+        "semester": "First Semester"
+      }
+    """.trimIndent()
+    val course = client.moshi.adapter(com.example.data.supabase.SupabaseCourse::class.java).fromJson(sampleCourseJson)
+    org.junit.Assert.assertNotNull(course)
+    assertEquals("RAD 201", course?.code)
+    assertEquals(convertedId, com.example.data.supabase.FlexibleIdHelper.toPositiveLong(course?.id))
+
+    val sampleExamJson = """
+      {
+        "id": "6e9c1164-73ee-46e8-bdd0-1b413de2e771",
+        "course_id": "4393642a-6eb7-459b-be42-0f353b7e25fe",
+        "title": "Mid-Semester Assessment",
+        "duration_minutes": 30,
+        "total_marks": 100,
+        "is_published": true
+      }
+    """.trimIndent()
+    val exam = client.moshi.adapter(com.example.data.supabase.SupabaseExam::class.java).fromJson(sampleExamJson)
+    org.junit.Assert.assertNotNull(exam)
+    assertEquals("Mid-Semester Assessment", exam?.title)
+    assertEquals(convertedId, com.example.data.supabase.FlexibleIdHelper.toPositiveLong(exam?.courseId))
   }
 }

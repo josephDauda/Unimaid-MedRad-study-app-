@@ -10,6 +10,7 @@ import com.example.data.local.entity.CourseLibraryEntity
 import com.example.data.local.entity.ExamEntity
 import com.example.data.local.entity.QuestionEntity
 import com.example.data.local.entity.StudyMaterialEntity
+import com.example.data.supabase.FlexibleIdHelper
 import com.example.data.supabase.SupabaseAnnouncement
 import com.example.data.supabase.SupabaseAppConfig
 import com.example.data.supabase.SupabaseClient
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -61,8 +63,32 @@ data class DailyCbtSprintConfig(
   val title: String = "Radiography Challenge",
   val subtitle: String = "15 practice questions ready for your level",
   val courseId: Long = 1L,
+  val courseCode: String = "RAD 101",
   val questionCount: Int = 15,
-  val activeStudentsText: String = "38 students active"
+  val activeStudentsText: String = "38 students active",
+  val theme: String = "NAVY_GOLD",
+  val questionIds: List<Long> = emptyList()
+)
+
+data class PracticeCardConfig(
+  val isConfigured: Boolean = true,
+  val courseId: Long = 1L,
+  val courseCode: String = "RAD 101",
+  val courseTitle: String = "Radiation Physics & Safety",
+  val questionCount: Int = 15,
+  val questionIds: List<Long> = emptyList()
+)
+
+data class MockCardConfig(
+  val isConfigured: Boolean = true,
+  val courseId: Long = 1L,
+  val courseCode: String = "RAD 101",
+  val courseTitle: String = "Radiation Physics & Safety",
+  val examId: Long = 0L,
+  val examTitle: String = "RAD 101 Mock Exam",
+  val questionCount: Int = 15,
+  val durationMinutes: Int = 30,
+  val questionIds: List<Long> = emptyList()
 )
 
 data class StudentFeedbackItem(
@@ -130,11 +156,41 @@ class CloudSyncManager(
       title = prefs.getString("sprint_title", "Radiography Challenge") ?: "Radiography Challenge",
       subtitle = prefs.getString("sprint_subtitle", "15 practice questions ready for your level") ?: "15 practice questions ready for your level",
       courseId = prefs.getLong("sprint_course_id", 1L),
+      courseCode = prefs.getString("sprint_course_code", "RAD 101") ?: "RAD 101",
       questionCount = prefs.getInt("sprint_question_count", 15),
-      activeStudentsText = prefs.getString("sprint_active_students", "38 students active") ?: "38 students active"
+      activeStudentsText = prefs.getString("sprint_active_students", "38 students active") ?: "38 students active",
+      theme = prefs.getString("sprint_theme", prefs.getString("global_card_style", "NAVY_GOLD") ?: "NAVY_GOLD") ?: "NAVY_GOLD",
+      questionIds = prefs.getString("sprint_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
     )
   )
   val dailySprintConfig: StateFlow<DailyCbtSprintConfig> = _dailySprintConfig.asStateFlow()
+
+  private val _practiceCardConfig = MutableStateFlow(
+    PracticeCardConfig(
+      isConfigured = prefs.getBoolean("practice_card_is_active", true),
+      courseId = prefs.getLong("practice_card_course_id", 1L),
+      courseCode = prefs.getString("practice_card_course_code", "RAD 101") ?: "RAD 101",
+      courseTitle = prefs.getString("practice_card_course_title", "Radiation Physics & Safety") ?: "Radiation Physics & Safety",
+      questionCount = prefs.getInt("practice_card_question_count", 15),
+      questionIds = prefs.getString("practice_card_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
+    )
+  )
+  val practiceCardConfig: StateFlow<PracticeCardConfig> = _practiceCardConfig.asStateFlow()
+
+  private val _mockCardConfig = MutableStateFlow(
+    MockCardConfig(
+      isConfigured = prefs.getBoolean("mock_card_is_active", true),
+      courseId = prefs.getLong("mock_card_course_id", 1L),
+      courseCode = prefs.getString("mock_card_course_code", "RAD 101") ?: "RAD 101",
+      courseTitle = prefs.getString("mock_card_course_title", "Radiation Physics & Safety") ?: "Radiation Physics & Safety",
+      examId = prefs.getLong("mock_card_exam_id", 0L),
+      examTitle = prefs.getString("mock_card_exam_title", "RAD 101 Mock Exam") ?: "RAD 101 Mock Exam",
+      questionCount = prefs.getInt("mock_card_question_count", 15),
+      durationMinutes = prefs.getInt("mock_card_duration_minutes", 30),
+      questionIds = prefs.getString("mock_card_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
+    )
+  )
+  val mockCardConfig: StateFlow<MockCardConfig> = _mockCardConfig.asStateFlow()
 
   var realtimeManager: SupabaseRealtimeManager? = null
     private set
@@ -142,6 +198,7 @@ class CloudSyncManager(
   init {
     startRealtimeListeners()
     scope.launch {
+      pullAppConfig()
       pullLatestFromCloud()
     }
   }
@@ -172,6 +229,18 @@ class CloudSyncManager(
       handleRealtimeEvent(table, eventType, record)
     }
     realtimeManager?.start()
+  }
+
+  fun parseJsonId(record: JSONObject, key: String, defaultVal: Long = 0L): Long {
+    if (!record.has(key)) return defaultVal
+    val optLong = record.optLong(key, 0L)
+    if (optLong > 0L) return optLong
+    val rawStr = record.optString(key, "")
+    if (rawStr.isNotBlank()) {
+      val parsed = FlexibleIdHelper.toPositiveLong(rawStr, defaultVal)
+      if (parsed > 0L) return parsed
+    }
+    return defaultVal
   }
 
   fun stopRealtimeListeners() {
@@ -215,17 +284,17 @@ class CloudSyncManager(
       when (table) {
         "courses" -> {
           if (eventType == "DELETE") {
-            val id = record.optLong("id", 0L)
+            val id = parseJsonId(record, "id", 0L)
             if (id > 0) {
               kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 database.academicDao().getCourseById(id)?.let { database.academicDao().deleteCourse(it) }
               }
             }
           } else if (record.has("code") && record.has("title")) {
-            val id = record.optLong("id", System.currentTimeMillis())
+            val id = parseJsonId(record, "id", System.currentTimeMillis())
             val entity = CourseEntity(
               id = id,
-              departmentId = record.optLong("department_id", 1L),
+              departmentId = parseJsonId(record, "department_id", 1L),
               code = record.optString("code"),
               title = record.optString("title"),
               level = record.optString("level", "100 Level"),
@@ -239,17 +308,17 @@ class CloudSyncManager(
         }
         "exams" -> {
           if (eventType == "DELETE") {
-            val id = record.optLong("id", 0L)
+            val id = parseJsonId(record, "id", 0L)
             if (id > 0) {
               kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 database.examDao().getExamById(id)?.let { database.examDao().deleteExam(it) }
               }
             }
           } else if (record.has("title")) {
-            val id = record.optLong("id", System.currentTimeMillis())
+            val id = parseJsonId(record, "id", System.currentTimeMillis())
             val entity = ExamEntity(
               id = id,
-              courseId = record.optLong("course_id", 1L),
+              courseId = parseJsonId(record, "course_id", 1L),
               title = record.optString("title"),
               description = record.optString("description", ""),
               durationMinutes = record.optInt("duration_minutes", 30),
@@ -264,18 +333,18 @@ class CloudSyncManager(
         }
         "questions" -> {
           if (eventType == "DELETE") {
-            val id = record.optLong("id", 0L)
+            val id = parseJsonId(record, "id", 0L)
             if (id > 0) {
               kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                 database.questionDao().getQuestionById(id)?.let { database.questionDao().deleteQuestion(it) }
               }
             }
           } else if (record.has("question_text")) {
-            val id = record.optLong("id", System.currentTimeMillis())
+            val id = parseJsonId(record, "id", System.currentTimeMillis())
             val entity = QuestionEntity(
               id = id,
-              courseId = record.optLong("course_id", 1L),
-              topicId = record.optLong("topic_id", 1L),
+              courseId = parseJsonId(record, "course_id", 1L),
+              topicId = parseJsonId(record, "topic_id", 1L),
               questionText = record.optString("question_text"),
               optionA = record.optString("option_a", ""),
               optionB = record.optString("option_b", ""),
@@ -286,7 +355,12 @@ class CloudSyncManager(
               difficulty = record.optString("difficulty", "Medium"),
               isPremium = record.optBoolean("is_premium", false),
               isPublished = record.optBoolean("is_published", true),
-              isDemo = record.optBoolean("is_demo", false)
+              isDemo = record.optBoolean("is_demo", false),
+              questionType = record.optString("question_type", "MULTIPLE_CHOICE"),
+              assessmentTitle = record.optString("assessment_title", "Continuous Assessment"),
+              marks = record.optInt("marks", 1),
+              timeLimitSeconds = record.optInt("time_limit_seconds", 60),
+              imageUrl = record.optString("image_url").takeIf { it.isNotBlank() }
             )
             kotlinx.coroutines.runBlocking(Dispatchers.IO) {
               database.questionDao().insertQuestion(entity)
@@ -295,13 +369,13 @@ class CloudSyncManager(
         }
         "study_materials" -> {
           val title = record.optString("title")
-          val courseId = record.optLong("course_id", 1L)
-          val id = record.optLong("id", System.currentTimeMillis())
+          val courseId = parseJsonId(record, "course_id", 1L)
+          val id = parseJsonId(record, "id", System.currentTimeMillis())
           if (title.isNotBlank()) {
             val entity = StudyMaterialEntity(
               id = id,
               courseId = courseId,
-              topicId = record.optLong("topic_id", 1L),
+              topicId = parseJsonId(record, "topic_id", 1L),
               title = title,
               description = record.optString("description", ""),
               contentType = record.optString("content_type", "Lecture Note"),
@@ -317,11 +391,11 @@ class CloudSyncManager(
         "course_libraries" -> {
           val name = record.optString("name")
           val url = record.optString("external_url")
-          val id = record.optLong("id", System.currentTimeMillis())
+          val id = parseJsonId(record, "id", System.currentTimeMillis())
           if (name.isNotBlank() && url.isNotBlank()) {
             val entity = CourseLibraryEntity(
               id = id,
-              courseId = record.optLong("course_id", 1L),
+              courseId = parseJsonId(record, "course_id", 1L),
               courseCode = record.optString("course_code", "RAD 101"),
               name = name,
               description = record.optString("description", ""),
@@ -364,18 +438,36 @@ class CloudSyncManager(
             _aboutAppContent.value = updated
           }
 
-          // Handle Realtime Daily CBT Sprint changes
+          // Handle Realtime Daily CBT Sprint changes & Global Theme Sync
           val sprintTitle = record.optString("sprint_title")
           val sprintSubtitle = record.optString("sprint_subtitle")
           val sprintBadge = record.optString("sprint_badge")
-          if (sprintTitle.isNotBlank() || sprintBadge.isNotBlank() || sprintSubtitle.isNotBlank()) {
+          val sprintTheme = record.optString("sprint_theme")
+          val effectiveTheme = if (sprintTheme.isNotBlank()) sprintTheme else cardStyle
+          if (effectiveTheme.isNotBlank()) {
+            _globalCardStyle.value = effectiveTheme
+            _dailySprintConfig.value = _dailySprintConfig.value.copy(theme = effectiveTheme)
+            prefs.edit()
+              .putString("global_card_style", effectiveTheme)
+              .putString("sprint_theme", effectiveTheme)
+              .apply()
+          }
+
+          val sprintQIds = if (record.has("sprint_question_ids")) {
+            record.optString("sprint_question_ids", "").split(",").mapNotNull { it.trim().toLongOrNull() }
+          } else _dailySprintConfig.value.questionIds
+
+          if (sprintTitle.isNotBlank() || sprintBadge.isNotBlank() || sprintSubtitle.isNotBlank() || record.has("sprint_course_id") || record.has("sprint_question_ids")) {
             val newSprint = _dailySprintConfig.value.copy(
               badge = if (sprintBadge.isNotBlank()) sprintBadge else _dailySprintConfig.value.badge,
               title = if (sprintTitle.isNotBlank()) sprintTitle else _dailySprintConfig.value.title,
               subtitle = if (sprintSubtitle.isNotBlank()) sprintSubtitle else _dailySprintConfig.value.subtitle,
-              courseId = if (record.has("sprint_course_id")) record.optLong("sprint_course_id", 1L) else _dailySprintConfig.value.courseId,
+              courseId = if (record.has("sprint_course_id")) parseJsonId(record, "sprint_course_id", 1L) else _dailySprintConfig.value.courseId,
+              courseCode = if (record.has("sprint_course_code")) record.optString("sprint_course_code", "RAD 101") else _dailySprintConfig.value.courseCode,
               questionCount = if (record.has("sprint_question_count")) record.optInt("sprint_question_count", 15) else _dailySprintConfig.value.questionCount,
-              activeStudentsText = if (record.has("sprint_active_students")) record.optString("sprint_active_students", _dailySprintConfig.value.activeStudentsText) else _dailySprintConfig.value.activeStudentsText
+              activeStudentsText = if (record.has("sprint_active_students")) record.optString("sprint_active_students", _dailySprintConfig.value.activeStudentsText) else _dailySprintConfig.value.activeStudentsText,
+              theme = if (effectiveTheme.isNotBlank()) effectiveTheme else _dailySprintConfig.value.theme,
+              questionIds = sprintQIds
             )
             _dailySprintConfig.value = newSprint
             prefs.edit()
@@ -383,21 +475,78 @@ class CloudSyncManager(
               .putString("sprint_title", newSprint.title)
               .putString("sprint_subtitle", newSprint.subtitle)
               .putLong("sprint_course_id", newSprint.courseId)
+              .putString("sprint_course_code", newSprint.courseCode)
               .putInt("sprint_question_count", newSprint.questionCount)
               .putString("sprint_active_students", newSprint.activeStudentsText)
+              .putString("sprint_theme", newSprint.theme)
+              .putString("sprint_question_ids", newSprint.questionIds.joinToString(","))
               .apply()
-            Log.i(tag, "Realtime Daily CBT Sprint updated: ${newSprint.title}")
+            Log.i(tag, "Realtime Daily CBT Sprint updated: ${newSprint.title} with theme ${newSprint.theme}")
+          }
+
+          if (record.has("practice_card_course_id") || record.has("practice_card_is_active") || record.has("practice_card_question_ids")) {
+            val practiceQIds = if (record.has("practice_card_question_ids")) {
+              record.optString("practice_card_question_ids", "").split(",").mapNotNull { it.trim().toLongOrNull() }
+            } else _practiceCardConfig.value.questionIds
+
+            val newPractice = _practiceCardConfig.value.copy(
+              isConfigured = record.optBoolean("practice_card_is_active", _practiceCardConfig.value.isConfigured),
+              courseId = parseJsonId(record, "practice_card_course_id", _practiceCardConfig.value.courseId),
+              courseCode = record.optString("practice_card_course_code", _practiceCardConfig.value.courseCode),
+              courseTitle = record.optString("practice_card_course_title", _practiceCardConfig.value.courseTitle),
+              questionCount = record.optInt("practice_card_question_count", _practiceCardConfig.value.questionCount),
+              questionIds = practiceQIds
+            )
+            _practiceCardConfig.value = newPractice
+            prefs.edit()
+              .putBoolean("practice_card_is_active", newPractice.isConfigured)
+              .putLong("practice_card_course_id", newPractice.courseId)
+              .putString("practice_card_course_code", newPractice.courseCode)
+              .putString("practice_card_course_title", newPractice.courseTitle)
+              .putInt("practice_card_question_count", newPractice.questionCount)
+              .putString("practice_card_question_ids", newPractice.questionIds.joinToString(","))
+              .apply()
+          }
+
+          if (record.has("mock_card_course_id") || record.has("mock_card_is_active") || record.has("mock_card_question_ids")) {
+            val mockQIds = if (record.has("mock_card_question_ids")) {
+              record.optString("mock_card_question_ids", "").split(",").mapNotNull { it.trim().toLongOrNull() }
+            } else _mockCardConfig.value.questionIds
+
+            val newMock = _mockCardConfig.value.copy(
+              isConfigured = record.optBoolean("mock_card_is_active", _mockCardConfig.value.isConfigured),
+              courseId = parseJsonId(record, "mock_card_course_id", _mockCardConfig.value.courseId),
+              courseCode = record.optString("mock_card_course_code", _mockCardConfig.value.courseCode),
+              courseTitle = record.optString("mock_card_course_title", _mockCardConfig.value.courseTitle),
+              examId = parseJsonId(record, "mock_card_exam_id", _mockCardConfig.value.examId),
+              examTitle = record.optString("mock_card_exam_title", _mockCardConfig.value.examTitle),
+              questionCount = record.optInt("mock_card_question_count", _mockCardConfig.value.questionCount),
+              durationMinutes = record.optInt("mock_card_duration_minutes", _mockCardConfig.value.durationMinutes),
+              questionIds = mockQIds
+            )
+            _mockCardConfig.value = newMock
+            prefs.edit()
+              .putBoolean("mock_card_is_active", newMock.isConfigured)
+              .putLong("mock_card_course_id", newMock.courseId)
+              .putString("mock_card_course_code", newMock.courseCode)
+              .putString("mock_card_course_title", newMock.courseTitle)
+              .putLong("mock_card_exam_id", newMock.examId)
+              .putString("mock_card_exam_title", newMock.examTitle)
+              .putInt("mock_card_question_count", newMock.questionCount)
+              .putInt("mock_card_duration_minutes", newMock.durationMinutes)
+              .putString("mock_card_question_ids", newMock.questionIds.joinToString(","))
+              .apply()
           }
         }
         "study_materials" -> {
           val title = record.optString("title")
-          val courseId = record.optLong("course_id", 1L)
-          val id = record.optLong("id", System.currentTimeMillis())
+          val courseId = parseJsonId(record, "course_id", 1L)
+          val id = parseJsonId(record, "id", System.currentTimeMillis())
           if (title.isNotBlank()) {
             val entity = StudyMaterialEntity(
               id = id,
               courseId = courseId,
-              topicId = record.optLong("topic_id", 1L),
+              topicId = parseJsonId(record, "topic_id", 1L),
               title = title,
               description = record.optString("description", ""),
               contentType = record.optString("content_type", "Lecture Note"),
@@ -411,11 +560,11 @@ class CloudSyncManager(
         "course_libraries" -> {
           val name = record.optString("name")
           val url = record.optString("external_url")
-          val id = record.optLong("id", System.currentTimeMillis())
+          val id = parseJsonId(record, "id", System.currentTimeMillis())
           if (name.isNotBlank() && url.isNotBlank()) {
             val entity = CourseLibraryEntity(
               id = id,
-              courseId = record.optLong("course_id", 1L),
+              courseId = parseJsonId(record, "course_id", 1L),
               courseCode = record.optString("course_code", "RAD 101"),
               name = name,
               description = record.optString("description", ""),
@@ -430,15 +579,15 @@ class CloudSyncManager(
         }
         "courses" -> {
           if (eventType == "DELETE") {
-            val id = record.optLong("id", 0L)
+            val id = parseJsonId(record, "id", 0L)
             if (id > 0) {
               database.academicDao().getCourseById(id)?.let { database.academicDao().deleteCourse(it) }
             }
           } else if (record.has("code") && record.has("title")) {
-            val id = record.optLong("id", System.currentTimeMillis())
+            val id = parseJsonId(record, "id", System.currentTimeMillis())
             val entity = CourseEntity(
               id = id,
-              departmentId = record.optLong("department_id", 1L),
+              departmentId = parseJsonId(record, "department_id", 1L),
               code = record.optString("code"),
               title = record.optString("title"),
               level = record.optString("level", "100 Level"),
@@ -452,15 +601,15 @@ class CloudSyncManager(
         }
         "exams" -> {
           if (eventType == "DELETE") {
-            val id = record.optLong("id", 0L)
+            val id = parseJsonId(record, "id", 0L)
             if (id > 0) {
               database.examDao().getExamById(id)?.let { database.examDao().deleteExam(it) }
             }
           } else if (record.has("title")) {
-            val id = record.optLong("id", System.currentTimeMillis())
+            val id = parseJsonId(record, "id", System.currentTimeMillis())
             val entity = ExamEntity(
               id = id,
-              courseId = record.optLong("course_id", 1L),
+              courseId = parseJsonId(record, "course_id", 1L),
               title = record.optString("title"),
               description = record.optString("description", ""),
               durationMinutes = record.optInt("duration_minutes", 30),
@@ -475,16 +624,16 @@ class CloudSyncManager(
         }
         "questions" -> {
           if (eventType == "DELETE") {
-            val id = record.optLong("id", 0L)
+            val id = parseJsonId(record, "id", 0L)
             if (id > 0) {
               database.questionDao().getQuestionById(id)?.let { database.questionDao().deleteQuestion(it) }
             }
           } else if (record.has("question_text")) {
-            val id = record.optLong("id", System.currentTimeMillis())
+            val id = parseJsonId(record, "id", System.currentTimeMillis())
             val entity = QuestionEntity(
               id = id,
-              courseId = record.optLong("course_id", 1L),
-              topicId = record.optLong("topic_id", 1L),
+              courseId = parseJsonId(record, "course_id", 1L),
+              topicId = parseJsonId(record, "topic_id", 1L),
               questionText = record.optString("question_text"),
               optionA = record.optString("option_a", ""),
               optionB = record.optString("option_b", ""),
@@ -499,12 +648,39 @@ class CloudSyncManager(
             )
             database.questionDao().insertQuestion(entity)
           } else {
-            val courseId = record.optLong("course_id", 0L).takeIf { it > 0 }
+            val courseId = parseJsonId(record, "course_id", 0L).takeIf { it > 0 }
             pullQuestions(courseId)
           }
         }
       }
     }
+  }
+
+  suspend fun pullAppConfig(): Boolean = withContext(Dispatchers.IO) {
+    if (!isNetworkAvailable()) return@withContext false
+    val res = supabaseClient.restGet("app_config?select=*&limit=1")
+    res.fold(
+      onSuccess = { json ->
+        try {
+          val array = JSONArray(json)
+          if (array.length() > 0) {
+            val record = array.getJSONObject(0)
+            handleRealtimeUpdate("app_config", "UPDATE", record)
+            true
+          } else false
+        } catch (e: Exception) {
+          try {
+            val record = JSONObject(json)
+            handleRealtimeUpdate("app_config", "UPDATE", record)
+            true
+          } catch (ex: Exception) {
+            Log.e(tag, "Error parsing app_config: ${ex.message}")
+            false
+          }
+        }
+      },
+      onFailure = { false }
+    )
   }
 
   suspend fun pullAnnouncements() = withContext(Dispatchers.IO) {
@@ -567,8 +743,8 @@ class CloudSyncManager(
           for (c in list) {
             database.academicDao().insertCourse(
               CourseEntity(
-                id = c.id,
-                departmentId = c.departmentId ?: 1L,
+                id = FlexibleIdHelper.toPositiveLong(c.id, 0L),
+                departmentId = FlexibleIdHelper.toPositiveLong(c.departmentId, 1L),
                 code = c.code,
                 title = c.title,
                 level = c.level ?: "100 Level",
@@ -599,9 +775,9 @@ class CloudSyncManager(
           for (m in list) {
             database.studyMaterialDao().insertMaterial(
               StudyMaterialEntity(
-                id = m.id,
-                courseId = m.courseId,
-                topicId = m.topicId ?: 1L,
+                id = FlexibleIdHelper.toPositiveLong(m.id, 0L),
+                courseId = FlexibleIdHelper.toPositiveLong(m.courseId, 1L),
+                topicId = FlexibleIdHelper.toPositiveLong(m.topicId, 1L),
                 title = m.title,
                 description = m.description ?: "",
                 contentType = m.contentType,
@@ -633,8 +809,8 @@ class CloudSyncManager(
           for (l in list) {
             database.courseLibraryDao().insertLibrary(
               CourseLibraryEntity(
-                id = l.id,
-                courseId = l.courseId,
+                id = FlexibleIdHelper.toPositiveLong(l.id, 0L),
+                courseId = FlexibleIdHelper.toPositiveLong(l.courseId, 1L),
                 courseCode = l.courseCode ?: "RAD 101",
                 name = l.name,
                 description = l.description ?: "",
@@ -664,8 +840,8 @@ class CloudSyncManager(
           for (e in list) {
             database.examDao().insertExam(
               ExamEntity(
-                id = e.id,
-                courseId = e.courseId,
+                id = FlexibleIdHelper.toPositiveLong(e.id, 0L),
+                courseId = FlexibleIdHelper.toPositiveLong(e.courseId, 1L),
                 title = e.title,
                 description = e.description ?: "",
                 durationMinutes = e.durationMinutes,
@@ -697,20 +873,25 @@ class CloudSyncManager(
           for (q in list) {
             database.questionDao().insertQuestion(
               QuestionEntity(
-                id = q.id,
-                courseId = q.courseId,
-                topicId = q.topicId ?: 1L,
+                id = FlexibleIdHelper.toPositiveLong(q.id, 0L),
+                courseId = FlexibleIdHelper.toPositiveLong(q.courseId, 1L),
+                topicId = FlexibleIdHelper.toPositiveLong(q.topicId, 1L),
                 questionText = q.questionText,
                 optionA = q.optionA,
                 optionB = q.optionB,
                 optionC = q.optionC,
                 optionD = q.optionD,
-                correctAnswer = "A",
-                explanation = "Refer to course clinical study packs for verified answer rationale.",
+                correctAnswer = q.correctAnswer ?: "A",
+                explanation = q.explanation ?: "Refer to course clinical study packs for verified answer rationale.",
                 difficulty = q.difficulty,
                 isPremium = q.isPremium,
                 isPublished = q.isPublished,
-                isDemo = q.isDemo
+                isDemo = q.isDemo,
+                questionType = q.questionType ?: "MULTIPLE_CHOICE",
+                assessmentTitle = q.assessmentTitle ?: "Continuous Assessment",
+                marks = q.marks ?: 1,
+                timeLimitSeconds = q.timeLimitSeconds ?: 60,
+                imageUrl = q.imageUrl
               )
             )
           }
@@ -730,6 +911,7 @@ class CloudSyncManager(
     }
     _isSyncing.value = true
     try {
+      pullAppConfig()
       pullAnnouncements()
       pullStudentFeedback()
       pullCourses()
@@ -747,9 +929,9 @@ class CloudSyncManager(
         for (m in list) {
           database.studyMaterialDao().insertMaterial(
             StudyMaterialEntity(
-              id = m.id,
-              courseId = m.courseId,
-              topicId = m.topicId ?: 1L,
+              id = FlexibleIdHelper.toPositiveLong(m.id, 0L),
+              courseId = FlexibleIdHelper.toPositiveLong(m.courseId, 1L),
+              topicId = FlexibleIdHelper.toPositiveLong(m.topicId, 1L),
               title = m.title,
               description = m.description ?: "",
               contentType = m.contentType,
@@ -776,8 +958,8 @@ class CloudSyncManager(
         for (l in list) {
           database.courseLibraryDao().insertLibrary(
             CourseLibraryEntity(
-              id = l.id,
-              courseId = l.courseId,
+              id = FlexibleIdHelper.toPositiveLong(l.id, 0L),
+              courseId = FlexibleIdHelper.toPositiveLong(l.courseId, 1L),
               courseCode = l.courseCode ?: "RAD 101",
               name = l.name,
               description = l.description ?: "",
@@ -828,10 +1010,73 @@ class CloudSyncManager(
               }
             }
           }
-          val cardStyle = item.optString("card_style")
+          val cardStyle = item.optString("card_style").ifBlank { item.optString("sprint_theme") }
           if (cardStyle.isNotBlank()) {
             _globalCardStyle.value = cardStyle
             prefs.edit().putString("global_card_style", cardStyle).apply()
+          }
+          if (item.has("sprint_title") || item.has("sprint_course_id") || item.has("sprint_badge")) {
+            val newSprint = _dailySprintConfig.value.copy(
+              badge = item.optString("sprint_badge").ifBlank { _dailySprintConfig.value.badge },
+              title = item.optString("sprint_title").ifBlank { _dailySprintConfig.value.title },
+              subtitle = item.optString("sprint_subtitle").ifBlank { _dailySprintConfig.value.subtitle },
+              courseId = parseJsonId(item, "sprint_course_id", _dailySprintConfig.value.courseId),
+              courseCode = item.optString("sprint_course_code").ifBlank { _dailySprintConfig.value.courseCode },
+              questionCount = if (item.has("sprint_question_count")) item.optInt("sprint_question_count", 15) else _dailySprintConfig.value.questionCount,
+              activeStudentsText = item.optString("sprint_active_students").ifBlank { _dailySprintConfig.value.activeStudentsText },
+              theme = if (cardStyle.isNotBlank()) cardStyle else _dailySprintConfig.value.theme
+            )
+            _dailySprintConfig.value = newSprint
+            prefs.edit()
+              .putString("sprint_badge", newSprint.badge)
+              .putString("sprint_title", newSprint.title)
+              .putString("sprint_subtitle", newSprint.subtitle)
+              .putLong("sprint_course_id", newSprint.courseId)
+              .putString("sprint_course_code", newSprint.courseCode)
+              .putInt("sprint_question_count", newSprint.questionCount)
+              .putString("sprint_active_students", newSprint.activeStudentsText)
+              .putString("sprint_theme", newSprint.theme)
+              .apply()
+          }
+          if (item.has("practice_card_course_id") || item.has("practice_card_is_active")) {
+            val newPractice = _practiceCardConfig.value.copy(
+              isConfigured = item.optBoolean("practice_card_is_active", _practiceCardConfig.value.isConfigured),
+              courseId = parseJsonId(item, "practice_card_course_id", _practiceCardConfig.value.courseId),
+              courseCode = item.optString("practice_card_course_code").ifBlank { _practiceCardConfig.value.courseCode },
+              courseTitle = item.optString("practice_card_course_title").ifBlank { _practiceCardConfig.value.courseTitle },
+              questionCount = if (item.has("practice_card_question_count")) item.optInt("practice_card_question_count", 15) else _practiceCardConfig.value.questionCount
+            )
+            _practiceCardConfig.value = newPractice
+            prefs.edit()
+              .putBoolean("practice_card_is_active", newPractice.isConfigured)
+              .putLong("practice_card_course_id", newPractice.courseId)
+              .putString("practice_card_course_code", newPractice.courseCode)
+              .putString("practice_card_course_title", newPractice.courseTitle)
+              .putInt("practice_card_question_count", newPractice.questionCount)
+              .apply()
+          }
+          if (item.has("mock_card_course_id") || item.has("mock_card_is_active")) {
+            val newMock = _mockCardConfig.value.copy(
+              isConfigured = item.optBoolean("mock_card_is_active", _mockCardConfig.value.isConfigured),
+              courseId = parseJsonId(item, "mock_card_course_id", _mockCardConfig.value.courseId),
+              courseCode = item.optString("mock_card_course_code").ifBlank { _mockCardConfig.value.courseCode },
+              courseTitle = item.optString("mock_card_course_title").ifBlank { _mockCardConfig.value.courseTitle },
+              examId = parseJsonId(item, "mock_card_exam_id", _mockCardConfig.value.examId),
+              examTitle = item.optString("mock_card_exam_title").ifBlank { _mockCardConfig.value.examTitle },
+              questionCount = if (item.has("mock_card_question_count")) item.optInt("mock_card_question_count", 15) else _mockCardConfig.value.questionCount,
+              durationMinutes = if (item.has("mock_card_duration_minutes")) item.optInt("mock_card_duration_minutes", 30) else _mockCardConfig.value.durationMinutes
+            )
+            _mockCardConfig.value = newMock
+            prefs.edit()
+              .putBoolean("mock_card_is_active", newMock.isConfigured)
+              .putLong("mock_card_course_id", newMock.courseId)
+              .putString("mock_card_course_code", newMock.courseCode)
+              .putString("mock_card_course_title", newMock.courseTitle)
+              .putLong("mock_card_exam_id", newMock.examId)
+              .putString("mock_card_exam_title", newMock.examTitle)
+              .putInt("mock_card_question_count", newMock.questionCount)
+              .putInt("mock_card_duration_minutes", newMock.durationMinutes)
+              .apply()
           }
         }
       } catch (e: Exception) {
@@ -1047,14 +1292,20 @@ class CloudSyncManager(
   suspend fun setGlobalCardStyle(style: String): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
       _globalCardStyle.value = style
-      prefs.edit().putString("global_card_style", style).apply()
-      val payload = SupabaseAppConfig(
-        id = "global",
-        cardStyle = style
+      _dailySprintConfig.value = _dailySprintConfig.value.copy(theme = style)
+      prefs.edit()
+        .putString("global_card_style", style)
+        .putString("sprint_theme", style)
+        .apply()
+      val payload = mapOf(
+        "id" to "global",
+        "card_style" to style,
+        "sprint_theme" to style,
+        "updated_at" to System.currentTimeMillis().toString()
       )
-      val json = supabaseClient.moshi.adapter(SupabaseAppConfig::class.java).toJson(payload)
+      val json = JSONObject(payload).toString()
       supabaseClient.restPost("app_config", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject().put("card_style", style))
+      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
       Result.success(true)
     } catch (e: Exception) {
       Result.failure(e)
@@ -1132,40 +1383,6 @@ class CloudSyncManager(
     }
   }
 
-  suspend fun generateSampleCloudMaterials(courseId: Long): Result<Int> = withContext(Dispatchers.IO) {
-    try {
-      val sampleMaterials = listOf(
-        StudyMaterialEntity(
-          courseId = courseId,
-          topicId = 1L,
-          title = "Radiographic Physics & Radiation Protection Comprehensive Guide",
-          description = "Official departmental clinical study pack covering inverse square law, filtration, and ALARA.",
-          contentType = "Lecture Note",
-          contentBody = "Section 1: Fundamental Principles of Radiation Protection\n- ALARA Principle (As Low As Reasonably Achievable)\n- Time, Distance, and Shielding fundamentals\n- Diagnostic reference levels for common examinations.",
-          externalUrl = "https://drive.google.com/drive/folders/sample-medrad-drive-physics",
-          isPremium = false
-        ),
-        StudyMaterialEntity(
-          courseId = courseId,
-          topicId = 2L,
-          title = "Clinical Radiographic Positioning & Anatomy Manual",
-          description = "Illustrated standard and special projections for extremities, chest, and spine examinations.",
-          contentType = "Handout",
-          contentBody = "Standard Projections Review:\n- Chest PA and Lateral positioning criteria\n- Upper extremity immobilization techniques\n- Quality assurance for diagnostic radiographs.",
-          externalUrl = "https://drive.google.com/drive/folders/sample-medrad-positioning-atlas",
-          isPremium = false
-        )
-      )
-      for (m in sampleMaterials) {
-        database.studyMaterialDao().insertMaterial(m)
-      }
-      pushAllContentToCloud()
-      Result.success(sampleMaterials.size)
-    } catch (e: Exception) {
-      Result.failure(e)
-    }
-  }
-
   suspend fun broadcastQuestion(q: QuestionEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
       val qDto = SupabaseQuestion(
@@ -1177,7 +1394,14 @@ class CloudSyncManager(
         optionB = q.optionB,
         optionC = q.optionC,
         optionD = q.optionD,
+        correctAnswer = q.correctAnswer,
+        explanation = q.explanation,
         difficulty = q.difficulty,
+        questionType = q.questionType,
+        assessmentTitle = q.assessmentTitle,
+        marks = q.marks,
+        timeLimitSeconds = q.timeLimitSeconds,
+        imageUrl = q.imageUrl,
         isPremium = q.isPremium,
         isPublished = q.isPublished,
         isDemo = q.isDemo
@@ -1247,6 +1471,16 @@ class CloudSyncManager(
       val json = supabaseClient.moshi.adapter(SupabaseCourse::class.java).toJson(cDto)
       val res = supabaseClient.restPost("courses", json, upsert = true)
       realtimeManager?.dispatchRealtimeEvent("courses", "INSERT", JSONObject(json))
+      Result.success(res.isSuccess)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun deleteCourseCloud(courseId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val res = supabaseClient.restDelete("courses?id=eq.$courseId")
+      realtimeManager?.dispatchRealtimeEvent("courses", "DELETE", JSONObject().put("id", courseId))
       Result.success(res.isSuccess)
     } catch (e: Exception) {
       Result.failure(e)
@@ -1387,32 +1621,111 @@ class CloudSyncManager(
   suspend fun updateDailySprintConfig(config: DailyCbtSprintConfig): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
       _dailySprintConfig.value = config
+      _globalCardStyle.value = config.theme
       prefs.edit()
         .putString("sprint_badge", config.badge)
         .putString("sprint_title", config.title)
         .putString("sprint_subtitle", config.subtitle)
         .putLong("sprint_course_id", config.courseId)
+        .putString("sprint_course_code", config.courseCode)
         .putInt("sprint_question_count", config.questionCount)
         .putString("sprint_active_students", config.activeStudentsText)
+        .putString("sprint_theme", config.theme)
+        .putString("global_card_style", config.theme)
+        .putString("sprint_question_ids", config.questionIds.joinToString(","))
         .apply()
 
       val payload = mapOf(
         "id" to "global",
+        "card_style" to config.theme,
+        "sprint_theme" to config.theme,
         "sprint_badge" to config.badge,
         "sprint_title" to config.title,
         "sprint_subtitle" to config.subtitle,
         "sprint_course_id" to config.courseId,
+        "sprint_course_code" to config.courseCode,
         "sprint_question_count" to config.questionCount,
         "sprint_active_students" to config.activeStudentsText,
+        "sprint_question_ids" to config.questionIds.joinToString(","),
         "updated_at" to System.currentTimeMillis().toString()
       )
-      val json = supabaseClient.moshi.adapter(Map::class.java).toJson(payload)
+      val json = JSONObject(payload).toString()
       val result = supabaseClient.restPost("app_config", json, upsert = true)
 
       // Instantly dispatch to Realtime subscribers
       realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
 
       if (result.isSuccess) Result.success(true) else Result.failure(result.exceptionOrNull() ?: Exception("Failed to update daily sprint"))
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun updatePracticeCardConfig(config: PracticeCardConfig): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      _practiceCardConfig.value = config
+      prefs.edit()
+        .putBoolean("practice_card_is_active", config.isConfigured)
+        .putLong("practice_card_course_id", config.courseId)
+        .putString("practice_card_course_code", config.courseCode)
+        .putString("practice_card_course_title", config.courseTitle)
+        .putInt("practice_card_question_count", config.questionCount)
+        .putString("practice_card_question_ids", config.questionIds.joinToString(","))
+        .apply()
+
+      val payload = mapOf(
+        "id" to "global",
+        "practice_card_is_active" to config.isConfigured,
+        "practice_card_course_id" to config.courseId,
+        "practice_card_course_code" to config.courseCode,
+        "practice_card_course_title" to config.courseTitle,
+        "practice_card_question_count" to config.questionCount,
+        "practice_card_question_ids" to config.questionIds.joinToString(","),
+        "updated_at" to System.currentTimeMillis().toString()
+      )
+      val json = JSONObject(payload).toString()
+      val result = supabaseClient.restPost("app_config", json, upsert = true)
+      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
+
+      if (result.isSuccess) Result.success(true) else Result.failure(result.exceptionOrNull() ?: Exception("Failed to update practice card"))
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun updateMockCardConfig(config: MockCardConfig): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      _mockCardConfig.value = config
+      prefs.edit()
+        .putBoolean("mock_card_is_active", config.isConfigured)
+        .putLong("mock_card_course_id", config.courseId)
+        .putString("mock_card_course_code", config.courseCode)
+        .putString("mock_card_course_title", config.courseTitle)
+        .putLong("mock_card_exam_id", config.examId)
+        .putString("mock_card_exam_title", config.examTitle)
+        .putInt("mock_card_question_count", config.questionCount)
+        .putInt("mock_card_duration_minutes", config.durationMinutes)
+        .putString("mock_card_question_ids", config.questionIds.joinToString(","))
+        .apply()
+
+      val payload = mapOf(
+        "id" to "global",
+        "mock_card_is_active" to config.isConfigured,
+        "mock_card_course_id" to config.courseId,
+        "mock_card_course_code" to config.courseCode,
+        "mock_card_course_title" to config.courseTitle,
+        "mock_card_exam_id" to config.examId,
+        "mock_card_exam_title" to config.examTitle,
+        "mock_card_question_count" to config.questionCount,
+        "mock_card_duration_minutes" to config.durationMinutes,
+        "mock_card_question_ids" to config.questionIds.joinToString(","),
+        "updated_at" to System.currentTimeMillis().toString()
+      )
+      val json = JSONObject(payload).toString()
+      val result = supabaseClient.restPost("app_config", json, upsert = true)
+      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
+
+      if (result.isSuccess) Result.success(true) else Result.failure(result.exceptionOrNull() ?: Exception("Failed to update mock card"))
     } catch (e: Exception) {
       Result.failure(e)
     }
