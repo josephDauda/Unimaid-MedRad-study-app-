@@ -658,25 +658,51 @@ class CloudSyncManager(
 
   suspend fun pullAppConfig(): Boolean = withContext(Dispatchers.IO) {
     if (!isNetworkAvailable()) return@withContext false
-    val res = supabaseClient.restGet("app_config?select=*&limit=1")
+    val res = supabaseClient.restGet("app_config?select=*")
     res.fold(
       onSuccess = { json ->
         try {
           val array = JSONArray(json)
-          if (array.length() > 0) {
-            val record = array.getJSONObject(0)
-            handleRealtimeUpdate("app_config", "UPDATE", record)
-            true
-          } else false
-        } catch (e: Exception) {
-          try {
-            val record = JSONObject(json)
-            handleRealtimeUpdate("app_config", "UPDATE", record)
-            true
-          } catch (ex: Exception) {
-            Log.e(tag, "Error parsing app_config: ${ex.message}")
-            false
+          for (i in 0 until array.length()) {
+            val record = array.getJSONObject(i)
+            val key = record.optString("key")
+            val value = record.optString("value")
+            if (key.isNotBlank()) {
+              when (key) {
+                "global_card_style", "card_style" -> {
+                  _globalCardStyle.value = value
+                  prefs.edit().putString("global_card_style", value).apply()
+                }
+                "about_description" -> {
+                  _aboutAppContent.value = _aboutAppContent.value.copy(description = value)
+                  prefs.edit().putString("about_desc", value).apply()
+                }
+                "sprint_title" -> {
+                  _dailySprintConfig.value = _dailySprintConfig.value.copy(title = value)
+                  prefs.edit().putString("sprint_title", value).apply()
+                }
+                "sprint_subtitle" -> {
+                  _dailySprintConfig.value = _dailySprintConfig.value.copy(subtitle = value)
+                  prefs.edit().putString("sprint_subtitle", value).apply()
+                }
+                "sprint_badge" -> {
+                  _dailySprintConfig.value = _dailySprintConfig.value.copy(badge = value)
+                  prefs.edit().putString("sprint_badge", value).apply()
+                }
+                "sprint_theme" -> {
+                  _globalCardStyle.value = value
+                  _dailySprintConfig.value = _dailySprintConfig.value.copy(theme = value)
+                  prefs.edit().putString("global_card_style", value).putString("sprint_theme", value).apply()
+                }
+              }
+            } else {
+              handleRealtimeUpdate("app_config", "UPDATE", record)
+            }
           }
+          true
+        } catch (e: Exception) {
+          Log.e(tag, "Error parsing app_config: ${e.message}")
+          false
         }
       },
       onFailure = { false }
@@ -695,9 +721,9 @@ class CloudSyncManager(
             id = it.id,
             title = it.title,
             message = it.message,
-            author = it.author,
+            author = it.author ?: "Department of Medical Radiography",
             priority = it.priority,
-            target = it.target,
+            target = it.target ?: "All Students",
             timestamp = System.currentTimeMillis()
           )
         }
@@ -718,9 +744,9 @@ class CloudSyncManager(
         val mapped = list.map {
           StudentFeedbackItem(
             id = it.id ?: UUID.randomUUID().toString(),
-            studentName = it.studentName,
-            studentEmail = it.studentEmail,
-            category = it.category,
+            studentName = it.studentName ?: "Student",
+            studentEmail = it.studentEmail ?: "",
+            category = it.subject ?: it.category ?: "Academic Inquiry",
             message = it.message,
             timestamp = System.currentTimeMillis()
           )
@@ -765,7 +791,10 @@ class CloudSyncManager(
 
   suspend fun pullStudyMaterials(courseId: Long? = null): Boolean = withContext(Dispatchers.IO) {
     if (!isNetworkAvailable()) return@withContext false
-    val endpoint = if (courseId != null) "study_materials?course_id=eq.$courseId&select=*" else "study_materials?select=*&limit=100"
+    val endpoint = if (courseId != null) {
+      val cUuid = FlexibleIdHelper.toUuidString(courseId, "course")
+      "study_materials?course_id=eq.$cUuid&select=*"
+    } else "study_materials?select=*&limit=100"
     val res = supabaseClient.restGet(endpoint)
     res.fold(
       onSuccess = { json ->
@@ -780,10 +809,10 @@ class CloudSyncManager(
                 topicId = FlexibleIdHelper.toPositiveLong(m.topicId, 1L),
                 title = m.title,
                 description = m.description ?: "",
-                contentType = m.contentType,
-                contentBody = m.contentBody,
-                externalUrl = m.externalUrl,
-                isPremium = m.isPremium
+                contentType = m.contentType ?: "Lecture Note",
+                contentBody = m.contentBody ?: "",
+                externalUrl = m.externalUrl ?: m.fileUrl,
+                isPremium = m.isPremium ?: false
               )
             )
           }
@@ -799,7 +828,10 @@ class CloudSyncManager(
 
   suspend fun pullCourseLibraries(courseId: Long? = null): Boolean = withContext(Dispatchers.IO) {
     if (!isNetworkAvailable()) return@withContext false
-    val endpoint = if (courseId != null) "course_libraries?course_id=eq.$courseId&select=*" else "course_libraries?select=*&limit=50"
+    val endpoint = if (courseId != null) {
+      val cUuid = FlexibleIdHelper.toUuidString(courseId, "course")
+      "course_libraries?course_id=eq.$cUuid&select=*"
+    } else "course_libraries?select=*&limit=50"
     val res = supabaseClient.restGet(endpoint)
     res.fold(
       onSuccess = { json ->
@@ -807,17 +839,21 @@ class CloudSyncManager(
           val type = Types.newParameterizedType(List::class.java, SupabaseCourseLibrary::class.java)
           val list = supabaseClient.moshi.adapter<List<SupabaseCourseLibrary>>(type).fromJson(json) ?: emptyList()
           for (l in list) {
-            database.courseLibraryDao().insertLibrary(
-              CourseLibraryEntity(
-                id = FlexibleIdHelper.toPositiveLong(l.id, 0L),
-                courseId = FlexibleIdHelper.toPositiveLong(l.courseId, 1L),
-                courseCode = l.courseCode ?: "RAD 101",
-                name = l.name,
-                description = l.description ?: "",
-                externalUrl = l.externalUrl,
-                isPublished = l.isPublished
+            val libName = l.name ?: l.title ?: "Library Resource"
+            val libUrl = l.url ?: l.externalUrl ?: ""
+            if (libUrl.isNotBlank()) {
+              database.courseLibraryDao().insertLibrary(
+                CourseLibraryEntity(
+                  id = FlexibleIdHelper.toPositiveLong(l.id, 0L),
+                  courseId = FlexibleIdHelper.toPositiveLong(l.courseId, 1L),
+                  courseCode = l.courseCode ?: "RAD 101",
+                  name = libName,
+                  description = l.description ?: "",
+                  externalUrl = libUrl,
+                  isPublished = l.isPublished
+                )
               )
-            )
+            }
           }
           true
         } catch (e: Exception) {
@@ -844,8 +880,8 @@ class CloudSyncManager(
                 courseId = FlexibleIdHelper.toPositiveLong(e.courseId, 1L),
                 title = e.title,
                 description = e.description ?: "",
-                durationMinutes = e.durationMinutes,
-                totalQuestions = maxOf(e.totalMarks / 2, 10),
+                durationMinutes = e.durationMinutes ?: 30,
+                totalQuestions = maxOf((e.totalMarks ?: 30) / 2, 10),
                 isPremium = false,
                 isPublished = e.isPublished
               )
@@ -863,7 +899,7 @@ class CloudSyncManager(
 
   suspend fun pullQuestions(courseId: Long? = null): Boolean = withContext(Dispatchers.IO) {
     if (!isNetworkAvailable()) return@withContext false
-    val endpoint = if (courseId != null) "questions?course_id=eq.$courseId&select=*" else "questions?select=*&limit=100"
+    val endpoint = "questions?select=*&limit=100"
     val res = supabaseClient.restGet(endpoint)
     res.fold(
       onSuccess = { json ->
@@ -871,10 +907,11 @@ class CloudSyncManager(
           val type = Types.newParameterizedType(List::class.java, SupabaseQuestion::class.java)
           val list = supabaseClient.moshi.adapter<List<SupabaseQuestion>>(type).fromJson(json) ?: emptyList()
           for (q in list) {
+            val qCourseId = FlexibleIdHelper.toPositiveLong(q.courseId ?: q.examId, courseId ?: 1L)
             database.questionDao().insertQuestion(
               QuestionEntity(
                 id = FlexibleIdHelper.toPositiveLong(q.id, 0L),
-                courseId = FlexibleIdHelper.toPositiveLong(q.courseId, 1L),
+                courseId = qCourseId,
                 topicId = FlexibleIdHelper.toPositiveLong(q.topicId, 1L),
                 questionText = q.questionText,
                 optionA = q.optionA,
@@ -883,10 +920,10 @@ class CloudSyncManager(
                 optionD = q.optionD,
                 correctAnswer = q.correctAnswer ?: "A",
                 explanation = q.explanation ?: "Refer to course clinical study packs for verified answer rationale.",
-                difficulty = q.difficulty,
-                isPremium = q.isPremium,
-                isPublished = q.isPublished,
-                isDemo = q.isDemo,
+                difficulty = q.difficulty ?: "Medium",
+                isPremium = q.isPremium ?: false,
+                isPublished = q.isPublished ?: q.isActive,
+                isDemo = q.isDemo ?: false,
                 questionType = q.questionType ?: "MULTIPLE_CHOICE",
                 assessmentTitle = q.assessmentTitle ?: "Continuous Assessment",
                 marks = q.marks ?: 1,
@@ -916,63 +953,8 @@ class CloudSyncManager(
       pullStudentFeedback()
       pullCourses()
       pullExams()
-      pullQuestions()
-
-      // Pull Study Materials
-    val matRes = supabaseClient.restGet("study_materials?select=*&limit=100")
-    var mCount = 0
-    matRes.onSuccess { json ->
-      try {
-        val type = Types.newParameterizedType(List::class.java, SupabaseStudyMaterial::class.java)
-        val adapter = supabaseClient.moshi.adapter<List<SupabaseStudyMaterial>>(type)
-        val list = adapter.fromJson(json) ?: emptyList()
-        for (m in list) {
-          database.studyMaterialDao().insertMaterial(
-            StudyMaterialEntity(
-              id = FlexibleIdHelper.toPositiveLong(m.id, 0L),
-              courseId = FlexibleIdHelper.toPositiveLong(m.courseId, 1L),
-              topicId = FlexibleIdHelper.toPositiveLong(m.topicId, 1L),
-              title = m.title,
-              description = m.description ?: "",
-              contentType = m.contentType,
-              contentBody = m.contentBody,
-              externalUrl = m.externalUrl,
-              isPremium = m.isPremium
-            )
-          )
-          mCount++
-        }
-      } catch (e: Exception) {
-        Log.e(tag, "Error parsing materials: ${e.message}")
-      }
-    }
-
-    // Pull Course Libraries
-    val libRes = supabaseClient.restGet("course_libraries?select=*&limit=50")
-    var lCount = 0
-    libRes.onSuccess { json ->
-      try {
-        val type = Types.newParameterizedType(List::class.java, SupabaseCourseLibrary::class.java)
-        val adapter = supabaseClient.moshi.adapter<List<SupabaseCourseLibrary>>(type)
-        val list = adapter.fromJson(json) ?: emptyList()
-        for (l in list) {
-          database.courseLibraryDao().insertLibrary(
-            CourseLibraryEntity(
-              id = FlexibleIdHelper.toPositiveLong(l.id, 0L),
-              courseId = FlexibleIdHelper.toPositiveLong(l.courseId, 1L),
-              courseCode = l.courseCode ?: "RAD 101",
-              name = l.name,
-              description = l.description ?: "",
-              externalUrl = l.externalUrl,
-              isPublished = l.isPublished
-            )
-          )
-          lCount++
-        }
-      } catch (e: Exception) {
-        Log.e(tag, "Error parsing libraries: ${e.message}")
-      }
-    }
+      pullStudyMaterials()
+      pullCourseLibraries()
 
     // Pull App Config
     val cfgRes = supabaseClient.restGet("app_config?select=*")
@@ -1084,12 +1066,20 @@ class CloudSyncManager(
       }
     }
 
+      val cCount = database.academicDao().getCoursesList().size
+      val mCount = database.studyMaterialDao().getAllMaterialsList().size
+      val lCount = database.courseLibraryDao().getAllLibrariesList().size
+      val eCount = database.examDao().getAllExamsList().size
+      val qCount = database.questionDao().getAllQuestionsList().size
+
       _isSyncing.value = false
       val report = SyncReport(
         success = true,
+        questionsSynced = qCount,
         materialsSynced = mCount,
-        examsSynced = lCount,
-        message = "Synced $mCount study materials and $lCount libraries from Supabase!"
+        examsSynced = eCount,
+        coursesSynced = cCount,
+        message = "Synced with Supabase: $cCount courses, $mCount materials, $lCount libraries, $eCount exams & $qCount questions loaded."
       )
       _lastSyncReport.value = report
       _cloudStatusMessage.value = "Synced Live with Supabase at ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())}"
@@ -1118,120 +1108,137 @@ class CloudSyncManager(
     var mCount = 0
     var lCount = 0
     var cCount = 0
+    var eCount = 0
+    var lastErrorMsg: String? = null
 
     try {
       // 1. Push Courses
       val courses = database.academicDao().getCoursesList()
       for (course in courses) {
-        val cDto = SupabaseCourse(
-          id = course.id,
-          departmentId = course.departmentId,
-          code = course.code,
-          title = course.title,
-          level = course.level,
-          semester = course.semester,
-          description = course.description
-        )
-        val json = supabaseClient.moshi.adapter(SupabaseCourse::class.java).toJson(cDto)
-        val res = supabaseClient.restPost("courses", json, upsert = true)
-        if (res.isSuccess) cCount++
+        val coursePayload = JSONObject().apply {
+          put("code", course.code)
+          put("title", course.title)
+          put("level", course.level)
+          put("semester", course.semester)
+          put("description", course.description)
+        }
+        val res = supabaseClient.restPost("courses", coursePayload.toString(), upsert = true)
+        if (res.isSuccess) {
+          cCount++
+        } else {
+          lastErrorMsg = res.exceptionOrNull()?.message
+        }
       }
 
       // 2. Push Study Materials
       val materials = database.studyMaterialDao().getAllMaterialsList()
       for (mat in materials) {
-        val mDto = SupabaseStudyMaterial(
-          id = mat.id,
-          courseId = mat.courseId,
-          topicId = mat.topicId,
-          title = mat.title,
-          description = mat.description,
-          contentType = mat.contentType,
-          contentBody = mat.contentBody,
-          externalUrl = mat.externalUrl,
-          isPremium = mat.isPremium
-        )
-        val json = supabaseClient.moshi.adapter(SupabaseStudyMaterial::class.java).toJson(mDto)
-        val res = supabaseClient.restPost("study_materials", json, upsert = true)
-        if (res.isSuccess) mCount++
+        val matPayload = JSONObject().apply {
+          put("title", mat.title)
+          put("description", mat.description)
+          if (!mat.externalUrl.isNullOrBlank()) {
+            put("external_url", mat.externalUrl)
+            put("file_url", mat.externalUrl)
+          }
+        }
+        val res = supabaseClient.restPost("study_materials", matPayload.toString(), upsert = true)
+        if (res.isSuccess) {
+          mCount++
+        } else {
+          lastErrorMsg = res.exceptionOrNull()?.message
+        }
       }
 
       // 3. Push Course Libraries
       val libraries = database.courseLibraryDao().getAllLibrariesList()
       for (lib in libraries) {
-        val lDto = SupabaseCourseLibrary(
-          id = lib.id,
-          courseId = lib.courseId,
-          courseCode = lib.courseCode,
-          name = lib.name,
-          description = lib.description,
-          externalUrl = lib.externalUrl,
-          isPublished = lib.isPublished
-        )
-        val json = supabaseClient.moshi.adapter(SupabaseCourseLibrary::class.java).toJson(lDto)
-        val res = supabaseClient.restPost("course_libraries", json, upsert = true)
-        if (res.isSuccess) lCount++
+        val libPayload = JSONObject().apply {
+          put("title", lib.name)
+          put("description", lib.description)
+          put("url", lib.externalUrl)
+          put("is_published", lib.isPublished)
+        }
+        val res = supabaseClient.restPost("course_libraries", libPayload.toString(), upsert = true)
+        if (res.isSuccess) {
+          lCount++
+        } else {
+          lastErrorMsg = res.exceptionOrNull()?.message
+        }
       }
 
       // 4. Push Questions
-      val allCourses = database.academicDao().getCoursesList()
-      for (c in allCourses) {
-        val questions = database.questionDao().getPublishedQuestionsForCourseList(c.id)
-        for (q in questions) {
-          val qDto = SupabaseQuestion(
-            id = q.id,
-            courseId = q.courseId,
-            topicId = q.topicId,
-            questionText = q.questionText,
-            optionA = q.optionA,
-            optionB = q.optionB,
-            optionC = q.optionC,
-            optionD = q.optionD,
-            difficulty = q.difficulty,
-            isPremium = q.isPremium,
-            isPublished = q.isPublished,
-            isDemo = q.isDemo
-          )
-          val json = supabaseClient.moshi.adapter(SupabaseQuestion::class.java).toJson(qDto)
-          val res = supabaseClient.restPost("questions", json, upsert = true)
-          if (res.isSuccess) qCount++
+      val allQuestions = database.questionDao().getAllQuestionsList()
+      for (q in allQuestions) {
+        val qPayload = JSONObject().apply {
+          put("question_text", q.questionText)
+          put("option_a", q.optionA)
+          put("option_b", q.optionB)
+          put("option_c", q.optionC)
+          put("option_d", q.optionD)
+          put("explanation", q.explanation)
+          put("question_type", q.questionType)
+          if (!q.imageUrl.isNullOrBlank()) {
+            put("image_url", q.imageUrl)
+          }
+        }
+        val res = supabaseClient.restPost("questions", qPayload.toString(), upsert = true)
+        if (res.isSuccess) {
+          qCount++
+        } else {
+          lastErrorMsg = res.exceptionOrNull()?.message
         }
       }
 
       // 5. Push Exams
       val allExams = database.examDao().getAllExamsList()
-      var eCount = 0
       for (ex in allExams) {
-        val eDto = SupabaseExam(
-          id = ex.id,
-          courseId = ex.courseId,
-          title = ex.title,
-          description = ex.description,
-          durationMinutes = ex.durationMinutes,
-          totalMarks = ex.totalQuestions * 2,
-          passPercentage = 50,
-          isPublished = ex.isPublished
-        )
-        val json = supabaseClient.moshi.adapter(SupabaseExam::class.java).toJson(eDto)
-        val res = supabaseClient.restPost("exams", json, upsert = true)
-        if (res.isSuccess) eCount++
+        val exPayload = JSONObject().apply {
+          put("title", ex.title)
+          put("description", ex.description)
+          put("is_published", ex.isPublished)
+          put("pass_mark", 50)
+        }
+        val res = supabaseClient.restPost("exams", exPayload.toString(), upsert = true)
+        if (res.isSuccess) {
+          eCount++
+        } else {
+          lastErrorMsg = res.exceptionOrNull()?.message
+        }
       }
 
       _isSyncing.value = false
-      val report = SyncReport(
-        success = true,
-        questionsSynced = qCount,
-        materialsSynced = mCount,
-        examsSynced = eCount,
-        coursesSynced = cCount,
-        message = "Pushed $cCount courses, $mCount materials, $lCount libraries, $eCount exams & $qCount questions LIVE to Supabase (${SupabaseConfig.PROJECT_ID})!"
-      )
-      _cloudStatusMessage.value = "Synced Live to Supabase at ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())}"
+      val anySuccess = (cCount + mCount + lCount + qCount + eCount) > 0
+      val report = if (anySuccess) {
+        SyncReport(
+          success = true,
+          questionsSynced = qCount,
+          materialsSynced = mCount,
+          examsSynced = eCount,
+          coursesSynced = cCount,
+          message = "Pushed $cCount courses, $mCount materials, $lCount libraries, $eCount exams & $qCount questions LIVE to Supabase (${SupabaseConfig.PROJECT_ID})!"
+        )
+      } else {
+        val isRls = lastErrorMsg?.contains("42501") == true || lastErrorMsg?.contains("row-level security") == true
+        val msg = if (isRls) {
+          "Cloud write blocked by Supabase Row-Level Security (RLS). All items remain safely stored in Room. Run the SQL migration script in Supabase SQL Editor to allow public writes."
+        } else {
+          "Cloud sync notice: ${lastErrorMsg ?: "Could not write to Supabase"}. All content remains safe in local Room storage."
+        }
+        SyncReport(
+          success = false,
+          message = msg
+        )
+      }
+      _cloudStatusMessage.value = if (anySuccess) {
+        "Synced Live to Supabase at ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())}"
+      } else {
+        "Local Room Cache Active (Cloud writes restricted by RLS policy)"
+      }
       _lastSyncReport.value = report
       report
     } catch (e: Exception) {
       _isSyncing.value = false
-      val report = SyncReport(false, message = "Supabase push error: ${e.message}")
+      val report = SyncReport(false, message = "Supabase push notice: ${e.message}. Saved locally in Room.")
       _lastSyncReport.value = report
       report
     }
@@ -1297,15 +1304,12 @@ class CloudSyncManager(
         .putString("global_card_style", style)
         .putString("sprint_theme", style)
         .apply()
-      val payload = mapOf(
-        "id" to "global",
-        "card_style" to style,
-        "sprint_theme" to style,
-        "updated_at" to System.currentTimeMillis().toString()
-      )
-      val json = JSONObject(payload).toString()
-      supabaseClient.restPost("app_config", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
+      val array = JSONArray().apply {
+        put(JSONObject().put("key", "card_style").put("value", style))
+        put(JSONObject().put("key", "sprint_theme").put("value", style))
+      }
+      supabaseClient.restPost("app_config", array.toString(), upsert = true)
+      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject().put("card_style", style))
       Result.success(true)
     } catch (e: Exception) {
       Result.failure(e)
@@ -1324,17 +1328,15 @@ class CloudSyncManager(
         .putString("update_notes", content.updateNotes)
         .apply()
 
-      val payload = SupabaseAppConfig(
-        id = "global",
-        aboutDescription = content.description,
-        versionNotes = content.versionNotes,
-        departmentContact = content.departmentContact,
-        credits = content.credits,
-        hasUpdateNotice = content.hasUpdateNotice,
-        updateNotes = content.updateNotes
-      )
-      val json = supabaseClient.moshi.adapter(SupabaseAppConfig::class.java).toJson(payload)
-      supabaseClient.restPost("app_config", json, upsert = true)
+      val array = JSONArray().apply {
+        put(JSONObject().put("key", "about_description").put("value", content.description))
+        put(JSONObject().put("key", "version_notes").put("value", content.versionNotes))
+        put(JSONObject().put("key", "department_contact").put("value", content.departmentContact))
+        put(JSONObject().put("key", "credits").put("value", content.credits))
+        put(JSONObject().put("key", "has_update_notice").put("value", content.hasUpdateNotice.toString()))
+        put(JSONObject().put("key", "update_notes").put("value", content.updateNotes))
+      }
+      supabaseClient.restPost("app_config", array.toString(), upsert = true)
 
       val eventObj = JSONObject().apply {
         put("about_description", content.description)
@@ -1359,14 +1361,11 @@ class CloudSyncManager(
     message: String
   ): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val item = SupabaseStudentFeedback(
-        studentName = studentName,
-        studentEmail = studentEmail,
-        category = category,
-        message = message
-      )
-      val json = supabaseClient.moshi.adapter(SupabaseStudentFeedback::class.java).toJson(item)
-      supabaseClient.restPost("student_feedback", json, upsert = false)
+      val payload = JSONObject().apply {
+        put("subject", category)
+        put("message", "From: $studentName ($studentEmail)\n\n$message")
+      }
+      supabaseClient.restPost("student_feedback", payload.toString(), upsert = false)
 
       val localItem = StudentFeedbackItem(
         id = UUID.randomUUID().toString(),
@@ -1635,25 +1634,22 @@ class CloudSyncManager(
         .putString("sprint_question_ids", config.questionIds.joinToString(","))
         .apply()
 
-      val payload = mapOf(
-        "id" to "global",
-        "card_style" to config.theme,
-        "sprint_theme" to config.theme,
-        "sprint_badge" to config.badge,
-        "sprint_title" to config.title,
-        "sprint_subtitle" to config.subtitle,
-        "sprint_course_id" to config.courseId,
-        "sprint_course_code" to config.courseCode,
-        "sprint_question_count" to config.questionCount,
-        "sprint_active_students" to config.activeStudentsText,
-        "sprint_question_ids" to config.questionIds.joinToString(","),
-        "updated_at" to System.currentTimeMillis().toString()
-      )
-      val json = JSONObject(payload).toString()
-      val result = supabaseClient.restPost("app_config", json, upsert = true)
+      val array = JSONArray().apply {
+        put(JSONObject().put("key", "card_style").put("value", config.theme))
+        put(JSONObject().put("key", "sprint_theme").put("value", config.theme))
+        put(JSONObject().put("key", "sprint_badge").put("value", config.badge))
+        put(JSONObject().put("key", "sprint_title").put("value", config.title))
+        put(JSONObject().put("key", "sprint_subtitle").put("value", config.subtitle))
+        put(JSONObject().put("key", "sprint_course_id").put("value", config.courseId.toString()))
+        put(JSONObject().put("key", "sprint_course_code").put("value", config.courseCode))
+        put(JSONObject().put("key", "sprint_question_count").put("value", config.questionCount.toString()))
+        put(JSONObject().put("key", "sprint_active_students").put("value", config.activeStudentsText))
+        put(JSONObject().put("key", "sprint_question_ids").put("value", config.questionIds.joinToString(",")))
+      }
+      val result = supabaseClient.restPost("app_config", array.toString(), upsert = true)
 
       // Instantly dispatch to Realtime subscribers
-      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
+      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject().put("sprint_theme", config.theme))
 
       if (result.isSuccess) Result.success(true) else Result.failure(result.exceptionOrNull() ?: Exception("Failed to update daily sprint"))
     } catch (e: Exception) {
@@ -1673,19 +1669,16 @@ class CloudSyncManager(
         .putString("practice_card_question_ids", config.questionIds.joinToString(","))
         .apply()
 
-      val payload = mapOf(
-        "id" to "global",
-        "practice_card_is_active" to config.isConfigured,
-        "practice_card_course_id" to config.courseId,
-        "practice_card_course_code" to config.courseCode,
-        "practice_card_course_title" to config.courseTitle,
-        "practice_card_question_count" to config.questionCount,
-        "practice_card_question_ids" to config.questionIds.joinToString(","),
-        "updated_at" to System.currentTimeMillis().toString()
-      )
-      val json = JSONObject(payload).toString()
-      val result = supabaseClient.restPost("app_config", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
+      val array = JSONArray().apply {
+        put(JSONObject().put("key", "practice_card_is_active").put("value", config.isConfigured.toString()))
+        put(JSONObject().put("key", "practice_card_course_id").put("value", config.courseId.toString()))
+        put(JSONObject().put("key", "practice_card_course_code").put("value", config.courseCode))
+        put(JSONObject().put("key", "practice_card_course_title").put("value", config.courseTitle))
+        put(JSONObject().put("key", "practice_card_question_count").put("value", config.questionCount.toString()))
+        put(JSONObject().put("key", "practice_card_question_ids").put("value", config.questionIds.joinToString(",")))
+      }
+      val result = supabaseClient.restPost("app_config", array.toString(), upsert = true)
+      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject().put("practice_card_is_active", config.isConfigured))
 
       if (result.isSuccess) Result.success(true) else Result.failure(result.exceptionOrNull() ?: Exception("Failed to update practice card"))
     } catch (e: Exception) {
@@ -1708,26 +1701,47 @@ class CloudSyncManager(
         .putString("mock_card_question_ids", config.questionIds.joinToString(","))
         .apply()
 
-      val payload = mapOf(
-        "id" to "global",
-        "mock_card_is_active" to config.isConfigured,
-        "mock_card_course_id" to config.courseId,
-        "mock_card_course_code" to config.courseCode,
-        "mock_card_course_title" to config.courseTitle,
-        "mock_card_exam_id" to config.examId,
-        "mock_card_exam_title" to config.examTitle,
-        "mock_card_question_count" to config.questionCount,
-        "mock_card_duration_minutes" to config.durationMinutes,
-        "mock_card_question_ids" to config.questionIds.joinToString(","),
-        "updated_at" to System.currentTimeMillis().toString()
-      )
-      val json = JSONObject(payload).toString()
-      val result = supabaseClient.restPost("app_config", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject(payload))
+      val array = JSONArray().apply {
+        put(JSONObject().put("key", "mock_card_is_active").put("value", config.isConfigured.toString()))
+        put(JSONObject().put("key", "mock_card_course_id").put("value", config.courseId.toString()))
+        put(JSONObject().put("key", "mock_card_course_code").put("value", config.courseCode))
+        put(JSONObject().put("key", "mock_card_course_title").put("value", config.courseTitle))
+        put(JSONObject().put("key", "mock_card_exam_id").put("value", config.examId.toString()))
+        put(JSONObject().put("key", "mock_card_exam_title").put("value", config.examTitle))
+        put(JSONObject().put("key", "mock_card_question_count").put("value", config.questionCount.toString()))
+        put(JSONObject().put("key", "mock_card_duration_minutes").put("value", config.durationMinutes.toString()))
+        put(JSONObject().put("key", "mock_card_question_ids").put("value", config.questionIds.joinToString(",")))
+      }
+      val result = supabaseClient.restPost("app_config", array.toString(), upsert = true)
+      realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject().put("mock_card_is_active", config.isConfigured))
 
       if (result.isSuccess) Result.success(true) else Result.failure(result.exceptionOrNull() ?: Exception("Failed to update mock card"))
     } catch (e: Exception) {
       Result.failure(e)
+    }
+  }
+
+  suspend fun testSupabaseConnection(): String = withContext(Dispatchers.IO) {
+    if (!isNetworkAvailable()) {
+      return@withContext "Network offline. Device is not connected to the internet."
+    }
+    val getRes = supabaseClient.restGet("courses?select=id&limit=1")
+    if (getRes.isFailure) {
+      return@withContext "Cannot reach Supabase REST API (${SupabaseConfig.PROJECT_ID}). Check URL or connectivity."
+    }
+    val testPayload = JSONArray().apply {
+      put(JSONObject().put("key", "test_connection").put("value", System.currentTimeMillis().toString()))
+    }
+    val postRes = supabaseClient.restPost("app_config", testPayload.toString(), upsert = true)
+    return@withContext if (postRes.isSuccess) {
+      "CONNECTED: Read & Write active on Supabase (${SupabaseConfig.PROJECT_ID}). Real-time cloud sync is fully operational!"
+    } else {
+      val err = postRes.exceptionOrNull()?.message ?: "RLS restricted"
+      if (err.contains("42501") || err.contains("row-level security")) {
+        "READ-ONLY ACCESS: Connected to Supabase (${SupabaseConfig.PROJECT_ID}), but writes are restricted by Row-Level Security (RLS). Run the SQL migration script in your Supabase dashboard to enable cloud updates."
+      } else {
+        "CONNECTED (Read Active): Remote database reachable. Write status: $err"
+      }
     }
   }
 }

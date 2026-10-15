@@ -22,7 +22,7 @@ data class SupabaseProfile(
 @JsonClass(generateAdapter = true)
 data class SupabaseCourse(
   val id: Any, // Can be Long, Int, or UUID String from Supabase
-  @Json(name = "department_id") val departmentId: Any? = 1L,
+  @Json(name = "department_id") val departmentId: Any? = null,
   val code: String,
   val title: String,
   val level: String? = null,
@@ -39,10 +39,12 @@ data class SupabaseStudyMaterial(
   @Json(name = "topic_id") val topicId: Any? = null,
   val title: String,
   val description: String? = null,
-  @Json(name = "content_type") val contentType: String = "Lecture Note",
-  @Json(name = "content_body") val contentBody: String = "",
+  @Json(name = "content_type") val contentType: String? = null,
+  @Json(name = "content_body") val contentBody: String? = null,
   @Json(name = "external_url") val externalUrl: String? = null,
-  @Json(name = "is_premium") val isPremium: Boolean = false,
+  @Json(name = "file_url") val fileUrl: String? = null,
+  @Json(name = "is_published") val isPublished: Boolean = true,
+  @Json(name = "is_premium") val isPremium: Boolean? = null,
   @Json(name = "created_at") val createdAt: String? = null,
   @Json(name = "updated_at") val updatedAt: String? = null
 )
@@ -52,9 +54,11 @@ data class SupabaseCourseLibrary(
   val id: Any, // Can be Long, Int, or UUID String from Supabase
   @Json(name = "course_id") val courseId: Any,
   @Json(name = "course_code") val courseCode: String? = null,
-  val name: String,
+  val name: String? = null,
+  val title: String? = null,
   val description: String? = null,
-  @Json(name = "external_url") val externalUrl: String,
+  val url: String? = null,
+  @Json(name = "external_url") val externalUrl: String? = null,
   @Json(name = "is_published") val isPublished: Boolean = true,
   @Json(name = "created_at") val createdAt: String? = null,
   @Json(name = "updated_at") val updatedAt: String? = null
@@ -65,9 +69,9 @@ data class SupabaseAnnouncement(
   val id: String,
   val title: String,
   val message: String,
-  val author: String = "Department of Medical Radiography",
+  val author: String? = null,
   val priority: String = "Normal",
-  val target: String = "All Students",
+  val target: String? = null,
   @Json(name = "created_at") val createdAt: String? = null,
   @Json(name = "updated_at") val updatedAt: String? = null
 )
@@ -78,46 +82,54 @@ data class SupabaseExam(
   @Json(name = "course_id") val courseId: Any,
   val title: String,
   val description: String? = null,
-  @Json(name = "duration_minutes") val durationMinutes: Int = 30,
-  @Json(name = "total_marks") val totalMarks: Int = 100,
-  @Json(name = "pass_percentage") val passPercentage: Int = 50,
+  @Json(name = "duration_minutes") val durationMinutes: Int? = null,
+  @Json(name = "total_marks") val totalMarks: Int? = null,
+  @Json(name = "pass_mark") val passMark: Int? = 50,
+  @Json(name = "pass_percentage") val passPercentage: Int? = null,
   @Json(name = "is_published") val isPublished: Boolean = true,
-  @Json(name = "created_at") val createdAt: String? = null
+  @Json(name = "created_at") val createdAt: String? = null,
+  @Json(name = "updated_at") val updatedAt: String? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class SupabaseQuestion(
   val id: Any, // Can be Long, Int, or UUID String from Supabase
-  @Json(name = "course_id") val courseId: Any,
+  @Json(name = "exam_id") val examId: Any? = null,
+  @Json(name = "course_id") val courseId: Any? = null,
   @Json(name = "topic_id") val topicId: Any? = null,
   @Json(name = "question_text") val questionText: String,
   @Json(name = "option_a") val optionA: String,
   @Json(name = "option_b") val optionB: String,
   @Json(name = "option_c") val optionC: String,
   @Json(name = "option_d") val optionD: String,
-  @Json(name = "correct_answer") val correctAnswer: String? = "A",
+  @Json(name = "correct_answer") val correctAnswer: String? = null,
   val explanation: String? = "",
-  val difficulty: String = "MEDIUM",
+  val difficulty: String? = null,
   @Json(name = "question_type") val questionType: String? = "MULTIPLE_CHOICE",
-  @Json(name = "assessment_title") val assessmentTitle: String? = "Continuous Assessment",
+  @Json(name = "assessment_title") val assessmentTitle: String? = null,
   val marks: Int? = 1,
-  @Json(name = "time_limit_seconds") val timeLimitSeconds: Int? = 60,
+  @Json(name = "time_limit_seconds") val timeLimitSeconds: Int? = null,
   @Json(name = "image_url") val imageUrl: String? = null,
-  @Json(name = "is_premium") val isPremium: Boolean = false,
-  @Json(name = "is_published") val isPublished: Boolean = true,
-  @Json(name = "is_demo") val isDemo: Boolean = false,
-  @Json(name = "created_at") val createdAt: String? = null
+  @Json(name = "is_active") val isActive: Boolean = true,
+  @Json(name = "is_premium") val isPremium: Boolean? = null,
+  @Json(name = "is_published") val isPublished: Boolean? = null,
+  @Json(name = "is_demo") val isDemo: Boolean? = null,
+  @Json(name = "created_at") val createdAt: String? = null,
+  @Json(name = "updated_at") val updatedAt: String? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class SupabaseExamAttempt(
   val id: String? = null,
-  @Json(name = "user_id") val userId: String,
-  @Json(name = "course_id") val courseId: Any,
+  @Json(name = "user_id") val userId: String? = null,
+  @Json(name = "exam_id") val examId: Any? = null,
+  @Json(name = "course_id") val courseId: Any? = null,
   val score: Int,
-  @Json(name = "total_questions") val totalQuestions: Int,
-  @Json(name = "time_spent_seconds") val timeSpentSeconds: Int,
-  @Json(name = "is_passed") val isPassed: Boolean,
+  @Json(name = "total_questions") val totalQuestions: Int? = null,
+  @Json(name = "time_spent_seconds") val timeSpentSeconds: Int? = null,
+  @Json(name = "is_passed") val isPassed: Boolean? = null,
+  val passed: Boolean? = null,
+  val percentage: Double? = null,
   @Json(name = "created_at") val createdAt: String? = null
 )
 
@@ -125,17 +137,22 @@ data class SupabaseExamAttempt(
 data class SupabaseStudentFeedback(
   val id: String? = null,
   @Json(name = "user_id") val userId: String? = null,
-  @Json(name = "student_name") val studentName: String = "Student",
-  @Json(name = "student_email") val studentEmail: String = "",
-  val category: String = "Academic Inquiry",
+  @Json(name = "student_id") val studentId: String? = null,
+  @Json(name = "student_name") val studentName: String? = null,
+  @Json(name = "student_email") val studentEmail: String? = null,
+  val subject: String? = null,
+  val category: String? = null,
   val message: String = "",
-  @Json(name = "created_at") val createdAt: String? = null
+  val status: String? = "PENDING",
+  @Json(name = "created_at") val createdAt: String? = null,
+  @Json(name = "updated_at") val updatedAt: String? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class SupabaseAppConfigKeyValue(
   val key: String? = null,
-  val value: String? = null
+  val value: String? = null,
+  @Json(name = "updated_at") val updatedAt: String? = null
 )
 
 @JsonClass(generateAdapter = true)

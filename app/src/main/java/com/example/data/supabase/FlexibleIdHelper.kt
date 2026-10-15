@@ -40,4 +40,17 @@ object FlexibleIdHelper {
     val parsed = toPositiveLong(raw, 0L)
     return if (parsed > 0L) parsed else null
   }
+
+  fun toUuidString(raw: Any?, namespace: String = "medrad"): String {
+    if (raw == null) return UUID.randomUUID().toString()
+    val str = raw.toString().trim()
+    if (str.length == 36 && str.count { it == '-' } == 4) {
+      return try {
+        UUID.fromString(str).toString()
+      } catch (_: Exception) {
+        UUID.nameUUIDFromBytes("${namespace}_$str".toByteArray()).toString()
+      }
+    }
+    return UUID.nameUUIDFromBytes("${namespace}_$str".toByteArray()).toString()
+  }
 }

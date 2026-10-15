@@ -601,7 +601,7 @@ fun CoursesScreen(
                           color = ProfessionalBlue
                         )
                         OutlinedButton(
-                          onClick = { onStartCoursePractice(currentCourse.id, currentCourse.code, currentCourse.title) },
+                          onClick = { onStartCoursePractice(currentCourse.id, currentCourse.code, exam.title) },
                           shape = RoundedCornerShape(8.dp)
                         ) {
                           Text("Take Quiz")

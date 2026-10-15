@@ -2540,6 +2540,10 @@ fun AdminLiveCloudSyncView(
   var customSupabaseKey by remember { mutableStateOf(adminViewModel.getSupabaseKey()) }
   var showProjectSettings by remember { mutableStateOf(false) }
 
+  var testConnectionResult by remember { mutableStateOf<String?>(null) }
+  var isTestingConnection by remember { mutableStateOf(false) }
+  var showMigrationDetails by remember { mutableStateOf(false) }
+
   // Daily CBT Sprint States
   val sprintConfig by adminViewModel.dailySprintConfig.collectAsState()
   var sprintBadge by remember(sprintConfig.badge) { mutableStateOf(sprintConfig.badge) }
@@ -2707,6 +2711,146 @@ fun AdminLiveCloudSyncView(
         Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(modifier = Modifier.width(6.dp))
         Text("Pull from Cloud", style = MaterialTheme.typography.labelLarge)
+      }
+    }
+
+    // 2a. Supabase Cloud Setup & SQL Migration Card
+    Card(
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("admin_supabase_migration_card"),
+      colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+      shape = RoundedCornerShape(14.dp)
+    ) {
+      Column(modifier = Modifier.padding(16.dp)) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.CloudDone, contentDescription = null, tint = ProfessionalBlue)
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+              Text(
+                text = "Supabase Cloud Setup & SQL Migration",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+              )
+              Text(
+                text = "Connected: ${adminViewModel.getSupabaseProjectId()}.supabase.co",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+          text = "If cloud push encounters Row-Level Security (RLS) restrictions or missing table columns, execute the setup SQL script once in your Supabase SQL Editor. This enables public read/write access and real-time schema alignment.",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          lineHeight = 18.sp
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Button(
+            onClick = {
+              clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(com.example.data.supabase.SupabaseMigrationScript.SQL))
+              feedbackMessage = "SQL migration script copied to clipboard! Paste and run it in Supabase SQL Editor."
+            },
+            modifier = Modifier.weight(1f).height(44.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = ProfessionalBlue),
+            shape = RoundedCornerShape(8.dp)
+          ) {
+            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Copy SQL Script", style = MaterialTheme.typography.labelMedium)
+          }
+
+          OutlinedButton(
+            onClick = {
+              isTestingConnection = true
+              testConnectionResult = "Testing Supabase REST API & table permissions..."
+              adminViewModel.testCloudConnection { result ->
+                isTestingConnection = false
+                testConnectionResult = result
+              }
+            },
+            enabled = !isTestingConnection,
+            modifier = Modifier.weight(1f).height(44.dp),
+            shape = RoundedCornerShape(8.dp)
+          ) {
+            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(if (isTestingConnection) "Testing..." else "Test Connection", style = MaterialTheme.typography.labelMedium)
+          }
+        }
+
+        testConnectionResult?.let { res ->
+          Spacer(modifier = Modifier.height(10.dp))
+          Surface(
+            color = if (res.startsWith("CONNECTED: Read & Write active")) SuccessGreen.copy(alpha = 0.12f)
+            else if (res.startsWith("READ-ONLY")) WarningAmber.copy(alpha = 0.12f)
+            else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text(
+              text = res,
+              color = if (res.startsWith("CONNECTED: Read & Write active")) SuccessGreen
+              else if (res.startsWith("READ-ONLY")) WarningAmber
+              else MaterialTheme.colorScheme.error,
+              style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+              modifier = Modifier.padding(10.dp)
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        TextButton(
+          onClick = { showMigrationDetails = !showMigrationDetails },
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text(
+            text = if (showMigrationDetails) "Hide Migration Steps ▲" else "How to Apply in Supabase (3 Simple Steps) ▼",
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+            color = ProfessionalBlue
+          )
+        }
+
+        if (showMigrationDetails) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+              .padding(12.dp)
+          ) {
+            Text(
+              text = "1. Open your Supabase Dashboard: supabase.com/dashboard/project/${adminViewModel.getSupabaseProjectId()}",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "2. Click on 'SQL Editor' in the left menu and click '+ New Query'.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = "3. Paste the copied SQL script and click 'Run'. Once finished, return here and click 'Test Connection'!",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurface
+            )
+          }
+        }
       }
     }
 

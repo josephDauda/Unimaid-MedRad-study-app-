@@ -1002,6 +1002,13 @@ class AdminViewModel(
     }
   }
 
+  fun testCloudConnection(onResult: (String) -> Unit) {
+    viewModelScope.launch {
+      val res = cloudSyncManager?.testSupabaseConnection() ?: "Cloud sync manager unavailable"
+      onResult(res)
+    }
+  }
+
   fun broadcastAnnouncement(title: String, message: String, priority: String, onDone: () -> Unit) {
     viewModelScope.launch {
       cloudSyncManager?.broadcastAnnouncement(title, message, priority)
