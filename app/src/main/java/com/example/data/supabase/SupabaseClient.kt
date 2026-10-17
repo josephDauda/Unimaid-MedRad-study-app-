@@ -34,11 +34,38 @@ class SupabaseClient(private val context: Context) {
     return prefs.getString("access_token", null)
   }
 
-  fun saveSession(token: String?, userId: String?) {
+  fun getRefreshToken(): String? {
+    return prefs.getString("refresh_token", null)
+  }
+
+  fun getExpiresAt(): Long {
+    return prefs.getLong("expires_at", 0L)
+  }
+
+  fun isSessionExpired(): Boolean {
+    val expiresAt = getExpiresAt()
+    if (expiresAt <= 0L) return false
+    // Consider expired if less than 60 seconds remain
+    return System.currentTimeMillis() >= (expiresAt - 60_000L)
+  }
+
+  fun saveSession(token: String?, refreshToken: String?, userId: String?, expiresInSeconds: Long? = 3600L) {
+    val expiresAt = if (expiresInSeconds != null && expiresInSeconds > 0) {
+      System.currentTimeMillis() + (expiresInSeconds * 1000L)
+    } else {
+      System.currentTimeMillis() + (3600L * 1000L)
+    }
     prefs.edit()
       .putString("access_token", token)
+      .putString("refresh_token", refreshToken)
       .putString("user_id", userId)
+      .putLong("expires_at", expiresAt)
       .apply()
+  }
+
+  fun saveSession(token: String?, userId: String?) {
+    val existingRefresh = getRefreshToken()
+    saveSession(token, existingRefresh, userId, 3600L)
   }
 
   fun clearSession() {
@@ -54,6 +81,28 @@ class SupabaseClient(private val context: Context) {
     val token = getAuthToken() ?: apiKey
     requestBuilder.addHeader("apikey", apiKey)
     requestBuilder.addHeader("Authorization", "Bearer $token")
+  }
+
+  suspend fun callRpc(rpcName: String, jsonPayload: String): Result<String> = withContext(Dispatchers.IO) {
+    try {
+      val baseUrl = SupabaseConfig.getUrl(context)
+      val url = "$baseUrl/rest/v1/rpc/$rpcName"
+      val requestBuilder = Request.Builder()
+        .url(url)
+        .post(jsonPayload.toRequestBody(jsonMediaType))
+
+      buildHeaders(requestBuilder)
+      val response = okHttpClient.newCall(requestBuilder.build()).execute()
+      val body = response.body?.string() ?: ""
+      if (response.isSuccessful) {
+        Result.success(body)
+      } else {
+        Result.failure(Exception("Supabase RPC $rpcName error: HTTP ${response.code}: $body"))
+      }
+    } catch (e: Exception) {
+      Log.e(tag, "callRpc failed for $rpcName: ${e.message}")
+      Result.failure(e)
+    }
   }
 
   suspend fun restGet(endpoint: String): Result<String> = withContext(Dispatchers.IO) {
@@ -103,6 +152,30 @@ class SupabaseClient(private val context: Context) {
     }
   }
 
+  suspend fun restPatch(endpoint: String, json: String): Result<String> = withContext(Dispatchers.IO) {
+    try {
+      val baseUrl = SupabaseConfig.getUrl(context)
+      val url = "$baseUrl/rest/v1/$endpoint"
+      val requestBuilder = Request.Builder()
+        .url(url)
+        .patch(json.toRequestBody(jsonMediaType))
+
+      buildHeaders(requestBuilder)
+      requestBuilder.addHeader("Prefer", "return=representation")
+
+      val response = okHttpClient.newCall(requestBuilder.build()).execute()
+      val body = response.body?.string() ?: ""
+      if (response.isSuccessful) {
+        Result.success(body)
+      } else {
+        Result.failure(Exception("Supabase PATCH error: HTTP ${response.code}: $body"))
+      }
+    } catch (e: Exception) {
+      Log.e(tag, "restPatch failed for $endpoint: ${e.message}")
+      Result.failure(e)
+    }
+  }
+
   suspend fun restDelete(endpoint: String): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
       val baseUrl = SupabaseConfig.getUrl(context)
@@ -144,7 +217,7 @@ class SupabaseClient(private val context: Context) {
         val adapter = moshi.adapter(SupabaseAuthResponse::class.java)
         val authResp = adapter.fromJson(body)
         if (authResp != null) {
-          saveSession(authResp.accessToken, authResp.user?.id)
+          saveSession(authResp.accessToken, authResp.refreshToken, authResp.user?.id, authResp.expiresIn)
           Result.success(authResp)
         } else {
           Result.failure(Exception("Failed to parse auth response"))
@@ -180,13 +253,50 @@ class SupabaseClient(private val context: Context) {
         val adapter = moshi.adapter(SupabaseAuthResponse::class.java)
         val authResp = adapter.fromJson(body)
         if (authResp != null) {
-          saveSession(authResp.accessToken, authResp.user?.id)
+          saveSession(authResp.accessToken, authResp.refreshToken, authResp.user?.id, authResp.expiresIn)
           Result.success(authResp)
         } else {
           Result.failure(Exception("Failed to parse auth signin response"))
         }
       } else {
         Result.failure(Exception("Auth error: HTTP ${response.code}: $body"))
+      }
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun authRefreshToken(): Result<SupabaseAuthResponse> = withContext(Dispatchers.IO) {
+    val refreshToken = getRefreshToken()
+    if (refreshToken.isNullOrBlank()) {
+      return@withContext Result.failure(Exception("No refresh token stored"))
+    }
+    try {
+      val baseUrl = SupabaseConfig.getUrl(context)
+      val url = "$baseUrl/auth/v1/token?grant_type=refresh_token"
+      val payload = mapOf("refresh_token" to refreshToken)
+      val json = moshi.adapter(Map::class.java).toJson(payload)
+      val requestBuilder = Request.Builder()
+        .url(url)
+        .post(json.toRequestBody(jsonMediaType))
+
+      val apiKey = SupabaseConfig.getPublishableKey(context)
+      requestBuilder.addHeader("apikey", apiKey)
+      requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+
+      val response = okHttpClient.newCall(requestBuilder.build()).execute()
+      val body = response.body?.string() ?: ""
+      if (response.isSuccessful) {
+        val adapter = moshi.adapter(SupabaseAuthResponse::class.java)
+        val authResp = adapter.fromJson(body)
+        if (authResp != null) {
+          saveSession(authResp.accessToken, authResp.refreshToken, authResp.user?.id, authResp.expiresIn)
+          Result.success(authResp)
+        } else {
+          Result.failure(Exception("Failed to parse refresh token response"))
+        }
+      } else {
+        Result.failure(Exception("Auth refresh error: HTTP ${response.code}: $body"))
       }
     } catch (e: Exception) {
       Result.failure(e)

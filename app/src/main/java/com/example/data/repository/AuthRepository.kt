@@ -36,6 +36,13 @@ class AuthRepository(private val context: Context, private val database: AppData
         val user = database.userDao().getUserById(savedUserId)
         if (user != null) {
           _currentUser.value = user
+          // Check if cloud session needs token refresh
+          if (supabaseClient.isSessionExpired()) {
+            val refreshRes = supabaseClient.authRefreshToken()
+            if (refreshRes.isFailure) {
+              Log.w(tag, "Supabase session refresh notice: ${refreshRes.exceptionOrNull()?.message}")
+            }
+          }
           syncProfileFromSupabase(user.email)
         } else {
           _currentUser.value = null
@@ -150,7 +157,7 @@ class AuthRepository(private val context: Context, private val database: AppData
           val authUser = authResp.user
           val accessToken = authResp.accessToken
           val supabaseUserId = authUser?.id ?: supabaseClient.getUserId() ?: "sb_${System.currentTimeMillis()}"
-          supabaseClient.saveSession(accessToken, supabaseUserId)
+          supabaseClient.saveSession(accessToken, authResp.refreshToken, supabaseUserId, authResp.expiresIn)
 
           // Fetch authoritative profile and role from Supabase profiles table
           try {

@@ -45,6 +45,16 @@ class MedradAppContainer(val context: Context) {
     com.example.data.repository.UserProfilePreferences(context)
   }
 
+  val notificationRepository: com.example.data.repository.NotificationRepository by lazy {
+    com.example.data.repository.NotificationRepository(
+      context = context,
+      database = database,
+      supabaseClient = cloudSyncManager.supabaseClient,
+      realtimeManager = cloudSyncManager.realtimeManager,
+      userProfilePreferences = userProfilePreferences
+    )
+  }
+
   init {
     CoroutineScope(Dispatchers.IO).launch {
       DatabaseInitializer.populateInitialData(database)

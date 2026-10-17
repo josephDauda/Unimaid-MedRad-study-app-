@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.testTag
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.Check
@@ -35,22 +36,34 @@ import androidx.compose.material.icons.outlined.Print
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Style
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -286,8 +299,9 @@ fun StudentProfileCardPreview(option: CardThemeOption) {
 }
 
 /**
- * 2. Push Notifications Broadcaster:
- * Admin composes and sends announcements to students with audible sound and notification center UI.
+ * 2. Push Notifications Broadcaster & Notification Management Dashboard:
+ * Admin composes, previews, and broadcasts announcements to students with live server verification,
+ * and manages (views, edits, deletes) published notifications.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -296,17 +310,29 @@ fun AdminPushNotificationsView(
 ) {
   var title by remember { mutableStateOf("") }
   var message by remember { mutableStateOf("") }
+
   val targetOptions = listOf("All Students", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "RAD 101", "RAD 102", "RAD 201")
   var selectedTarget by remember { mutableStateOf(targetOptions.first()) }
   var targetExpanded by remember { mutableStateOf(false) }
+
+  val categoryOptions = listOf("General Announcement", "Exam Alert", "Lecture Update", "Assignment / Practical", "Urgent Notice")
+  var selectedCategory by remember { mutableStateOf(categoryOptions.first()) }
+  var categoryExpanded by remember { mutableStateOf(false) }
 
   val priorities = listOf("Normal", "Urgent", "Exam Alert")
   var selectedPriority by remember { mutableStateOf(priorities.first()) }
 
   var statusMessage by remember { mutableStateOf<String?>(null) }
+  var isStatusError by remember { mutableStateOf(false) }
   var isSending by remember { mutableStateOf(false) }
+  var showPreviewDialog by remember { mutableStateOf(false) }
 
-  val recentAnnouncements by adminViewModel.announcements.collectAsState()
+  // State for Viewing / Editing / Deleting notifications
+  var viewingNotification by remember { mutableStateOf<com.example.data.local.entity.NotificationEntity?>(null) }
+  var editingNotification by remember { mutableStateOf<com.example.data.local.entity.NotificationEntity?>(null) }
+  var deletingNotificationId by remember { mutableStateOf<String?>(null) }
+
+  val adminNotifications by adminViewModel.allAdminNotifications.collectAsState()
 
   Column(
     modifier = Modifier
@@ -320,7 +346,7 @@ fun AdminPushNotificationsView(
       color = MaterialTheme.colorScheme.onSurface
     )
     Text(
-      text = "Send departmental alerts, lecture changes, and exam reminders. Students receive an in-app banner alert and notification sound.",
+      text = "Send official departmental alerts, CBT exam notices, and timetable updates. Notifications are saved to Supabase and delivered to registered students.",
       style = MaterialTheme.typography.bodySmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant
     )
@@ -328,7 +354,9 @@ fun AdminPushNotificationsView(
     Spacer(modifier = Modifier.height(16.dp))
 
     Card(
-      modifier = Modifier.fillMaxWidth(),
+      modifier = Modifier
+        .fillMaxWidth()
+        .testTag("admin_compose_notification_card"),
       shape = RoundedCornerShape(14.dp),
       colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
       border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -338,46 +366,86 @@ fun AdminPushNotificationsView(
           value = title,
           onValueChange = { title = it },
           label = { Text("Notification Title") },
-          placeholder = { Text("e.g. RAD 101 Mock Exam Scheduled for Friday", color = TextMuted) },
-          modifier = Modifier.fillMaxWidth(),
+          placeholder = { Text("e.g. RAD 101 Mock Exam Scheduled for Friday", color = com.example.ui.theme.TextMuted) },
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("admin_notification_title_input"),
           shape = RoundedCornerShape(10.dp),
           colors = outlinedFieldColors()
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Target audience dropdown
-        ExposedDropdownMenuBox(
-          expanded = targetExpanded,
-          onExpandedChange = { targetExpanded = it }
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          OutlinedTextField(
-            value = selectedTarget,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("Target Audience") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = targetExpanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
-            colors = outlinedFieldColors()
-          )
-          ExposedDropdownMenu(
-            expanded = targetExpanded,
-            onDismissRequest = { targetExpanded = false }
+          // Category dropdown
+          ExposedDropdownMenuBox(
+            expanded = categoryExpanded,
+            onExpandedChange = { categoryExpanded = it },
+            modifier = Modifier.weight(1f)
           ) {
-            targetOptions.forEach { opt ->
-              DropdownMenuItem(
-                text = { Text(opt) },
-                onClick = {
-                  selectedTarget = opt
-                  targetExpanded = false
-                }
-              )
+            OutlinedTextField(
+              value = selectedCategory,
+              onValueChange = {},
+              readOnly = true,
+              label = { Text("Category") },
+              trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
+              modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+              shape = RoundedCornerShape(10.dp),
+              colors = outlinedFieldColors()
+            )
+            ExposedDropdownMenu(
+              expanded = categoryExpanded,
+              onDismissRequest = { categoryExpanded = false }
+            ) {
+              categoryOptions.forEach { opt ->
+                DropdownMenuItem(
+                  text = { Text(opt) },
+                  onClick = {
+                    selectedCategory = opt
+                    categoryExpanded = false
+                  }
+                )
+              }
+            }
+          }
+
+          // Target audience dropdown
+          ExposedDropdownMenuBox(
+            expanded = targetExpanded,
+            onExpandedChange = { targetExpanded = it },
+            modifier = Modifier.weight(1f)
+          ) {
+            OutlinedTextField(
+              value = selectedTarget,
+              onValueChange = {},
+              readOnly = true,
+              label = { Text("Target Audience") },
+              trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = targetExpanded) },
+              modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+              shape = RoundedCornerShape(10.dp),
+              colors = outlinedFieldColors()
+            )
+            ExposedDropdownMenu(
+              expanded = targetExpanded,
+              onDismissRequest = { targetExpanded = false }
+            ) {
+              targetOptions.forEach { opt ->
+                DropdownMenuItem(
+                  text = { Text(opt) },
+                  onClick = {
+                    selectedTarget = opt
+                    targetExpanded = false
+                  }
+                )
+              }
             }
           }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Priority selector
         Row(
@@ -401,82 +469,461 @@ fun AdminPushNotificationsView(
           }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
           value = message,
           onValueChange = { message = it },
           label = { Text("Notification Message") },
-          placeholder = { Text("Enter detailed instruction, venue, or syllabus details...", color = TextMuted) },
-          modifier = Modifier.fillMaxWidth().height(120.dp),
+          placeholder = { Text("Enter detailed instruction, venue, or syllabus details...", color = com.example.ui.theme.TextMuted) },
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(130.dp)
+            .testTag("admin_notification_message_input"),
           shape = RoundedCornerShape(10.dp),
           colors = outlinedFieldColors(),
-          maxLines = 4
+          maxLines = 5
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (statusMessage != null) {
-          Text(statusMessage!!, color = SuccessGreen, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.padding(bottom = 10.dp))
-        }
-
-        Button(
-          onClick = {
-            if (title.isNotBlank() && message.isNotBlank()) {
-              isSending = true
-              adminViewModel.sendPushNotification(title.trim(), message.trim(), selectedTarget, selectedPriority) {
-                isSending = false
-                statusMessage = "Notification broadcasted successfully to $selectedTarget!"
-                title = ""
-                message = ""
-              }
-            }
-          },
-          modifier = Modifier.fillMaxWidth().height(48.dp),
-          shape = RoundedCornerShape(10.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-          enabled = !isSending && title.isNotBlank() && message.isNotBlank()
-        ) {
-          Icon(Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(if (isSending) "Broadcasting..." else "Push Notification Now")
-        }
-      }
-    }
-
-    Spacer(modifier = Modifier.height(20.dp))
-
-    Text(
-      text = "Recent Department Announcements (${recentAnnouncements.size})",
-      style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-      color = MaterialTheme.colorScheme.onSurface
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-
-    recentAnnouncements.forEach { ann ->
-      Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-      ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+        statusMessage?.let { msg ->
+          Surface(
+            color = if (isStatusError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+            else if (msg.contains("Row-Level Security") || msg.contains("RLS")) com.example.ui.theme.WarningAmber.copy(alpha = 0.15f)
+            else com.example.ui.theme.SuccessGreen.copy(alpha = 0.15f),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(bottom = 12.dp)
           ) {
-            Text(ann.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-            Text(ann.priority, style = MaterialTheme.typography.labelSmall, color = WarningAmber)
+            Row(
+              modifier = Modifier.padding(10.dp),
+              verticalAlignment = Alignment.Top
+            ) {
+              Icon(
+                if (isStatusError) Icons.Default.Close
+                else if (msg.contains("Row-Level Security") || msg.contains("RLS")) Icons.Default.Warning
+                else Icons.Default.CloudDone,
+                contentDescription = null,
+                tint = if (isStatusError) MaterialTheme.colorScheme.error
+                else if (msg.contains("Row-Level Security") || msg.contains("RLS")) com.example.ui.theme.WarningAmber
+                else com.example.ui.theme.SuccessGreen,
+                modifier = Modifier.size(18.dp)
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = msg,
+                color = if (isStatusError) MaterialTheme.colorScheme.error
+                else if (msg.contains("Row-Level Security") || msg.contains("RLS")) com.example.ui.theme.WarningAmber
+                else com.example.ui.theme.SuccessGreen,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                lineHeight = 18.sp
+              )
+            }
           }
-          Spacer(modifier = Modifier.height(4.dp))
-          Text(ann.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-          Spacer(modifier = Modifier.height(4.dp))
-          Text("Target: ${ann.target} • ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(ann.timestamp))}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          OutlinedButton(
+            onClick = { showPreviewDialog = true },
+            enabled = title.isNotBlank() && message.isNotBlank(),
+            modifier = Modifier.weight(1f).height(48.dp),
+            shape = RoundedCornerShape(10.dp)
+          ) {
+            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Preview", style = MaterialTheme.typography.labelMedium)
+          }
+
+          Button(
+            onClick = {
+              if (title.trim().length >= 3 && message.trim().length >= 5) {
+                isSending = true
+                statusMessage = "Submitting to Supabase cloud..."
+                isStatusError = false
+                adminViewModel.broadcastNotification(
+                  title = title.trim(),
+                  message = message.trim(),
+                  category = selectedCategory,
+                  priority = selectedPriority,
+                  target = selectedTarget
+                ) { result ->
+                  isSending = false
+                  if (result.isSuccess) {
+                    val notif = result.getOrNull()
+                    val cloudConfirmed = notif?.isSyncedWithCloud == true
+                    statusMessage = if (cloudConfirmed) {
+                      "Published and confirmed live on Supabase (${adminViewModel.getSupabaseProjectId()})! Broadcasted to $selectedTarget."
+                    } else {
+                      "Saved to local database and ready for sync."
+                    }
+                    isStatusError = false
+                    title = ""
+                    message = ""
+                  } else {
+                    val errorMsg = result.exceptionOrNull()?.message ?: "Publication failed"
+                    statusMessage = errorMsg
+                    isStatusError = !errorMsg.contains("RLS") && !errorMsg.contains("Row-Level Security")
+                  }
+                }
+              }
+            },
+            modifier = Modifier
+              .weight(1.5f)
+              .height(48.dp)
+              .testTag("admin_broadcast_notification_button"),
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+            enabled = !isSending && title.trim().length >= 3 && message.trim().length >= 5
+          ) {
+            if (isSending) {
+              CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+              Spacer(modifier = Modifier.width(8.dp))
+              Text("Publishing...")
+            } else {
+              Icon(Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(8.dp))
+              Text("Publish Live")
+            }
+          }
         }
       }
     }
 
     Spacer(modifier = Modifier.height(24.dp))
+
+    // Published Notifications Management Section
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text(
+        text = "Published Notifications (${adminNotifications.size})",
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.onSurface
+      )
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    if (adminNotifications.isEmpty()) {
+      Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Column(
+          modifier = Modifier.padding(20.dp),
+          horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+          Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(32.dp))
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "No notifications broadcasted yet.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        }
+      }
+    } else {
+      adminNotifications.forEach { item ->
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .testTag("admin_notif_item_${item.id}"),
+          shape = RoundedCornerShape(12.dp),
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        ) {
+          Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                Surface(
+                  color = if (item.priority.contains("Exam", ignoreCase = true)) Color(0xFFFEE2E2)
+                  else if (item.priority.contains("Urgent", ignoreCase = true)) com.example.ui.theme.WarningAmber.copy(alpha = 0.15f)
+                  else com.example.ui.theme.MedicalTeal.copy(alpha = 0.15f),
+                  shape = RoundedCornerShape(6.dp)
+                ) {
+                  Text(
+                    text = item.priority.uppercase(),
+                    color = if (item.priority.contains("Exam", ignoreCase = true)) Color(0xFFDC2626)
+                    else if (item.priority.contains("Urgent", ignoreCase = true)) com.example.ui.theme.WarningAmber
+                    else com.example.ui.theme.MedicalTeal,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+
+                Surface(
+                  color = MaterialTheme.colorScheme.surfaceVariant,
+                  shape = RoundedCornerShape(6.dp)
+                ) {
+                  Text(
+                    text = item.category,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                  )
+                }
+              }
+
+              // Cloud sync indicator
+              Surface(
+                color = if (item.isSyncedWithCloud) com.example.ui.theme.SuccessGreen.copy(alpha = 0.12f)
+                else com.example.ui.theme.WarningAmber.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(12.dp)
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Icon(
+                    if (item.isSyncedWithCloud) Icons.Default.CloudDone else Icons.Default.CloudOff,
+                    contentDescription = null,
+                    tint = if (item.isSyncedWithCloud) com.example.ui.theme.SuccessGreen else com.example.ui.theme.WarningAmber,
+                    modifier = Modifier.size(12.dp)
+                  )
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = if (item.isSyncedWithCloud) "CLOUD" else "ROOM",
+                    color = if (item.isSyncedWithCloud) com.example.ui.theme.SuccessGreen else com.example.ui.theme.WarningAmber,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                  )
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+              text = item.title,
+              style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+              text = item.message,
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              maxLines = 2,
+              lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val dateFormatted = SimpleDateFormat("dd/MM/yyyy • hh:mm a", Locale.getDefault()).format(Date(item.createdAt))
+            Text(
+              text = "Audience: ${item.target} • $dateFormatted",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.End,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              TextButton(
+                onClick = { viewingNotification = item }
+              ) {
+                Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("View", style = MaterialTheme.typography.labelSmall)
+              }
+
+              TextButton(
+                onClick = { editingNotification = item }
+              ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Edit", style = MaterialTheme.typography.labelSmall)
+              }
+
+              TextButton(
+                onClick = { deletingNotificationId = item.id },
+                colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444))
+              ) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Delete", style = MaterialTheme.typography.labelSmall)
+              }
+            }
+          }
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+  }
+
+  // 1. Preview Before Broadcast Dialog
+  if (showPreviewDialog) {
+    AlertDialog(
+      onDismissRequest = { showPreviewDialog = false },
+      title = {
+        Text("Student Notification Preview", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+      },
+      text = {
+        Column {
+          Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                Text(selectedCategory, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                Text(selectedPriority.uppercase(), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = com.example.ui.theme.WarningAmber)
+              }
+              Spacer(modifier = Modifier.height(6.dp))
+              Text(title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
+              Spacer(modifier = Modifier.height(4.dp))
+              Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              Spacer(modifier = Modifier.height(8.dp))
+              Text("Audience: $selectedTarget • Today, now", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(onClick = { showPreviewDialog = false }) {
+          Text("Done")
+        }
+      }
+    )
+  }
+
+  // 2. View Notification Dialog
+  viewingNotification?.let { notif ->
+    AlertDialog(
+      onDismissRequest = { viewingNotification = null },
+      title = {
+        Text(notif.title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+      },
+      text = {
+        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+          Text("Category: ${notif.category} • Priority: ${notif.priority}", style = MaterialTheme.typography.labelSmall, color = com.example.ui.theme.ProfessionalBlue)
+          Text("Target Audience: ${notif.target}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          Spacer(modifier = Modifier.height(8.dp))
+          HorizontalDivider()
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(notif.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        }
+      },
+      confirmButton = {
+        Button(onClick = { viewingNotification = null }) {
+          Text("Close")
+        }
+      }
+    )
+  }
+
+  // 3. Edit Notification Dialog
+  editingNotification?.let { notif ->
+    var editTitle by remember { mutableStateOf(notif.title) }
+    var editMessage by remember { mutableStateOf(notif.message) }
+    var editCategory by remember { mutableStateOf(notif.category) }
+    var editPriority by remember { mutableStateOf(notif.priority) }
+    var editTarget by remember { mutableStateOf(notif.target) }
+    var isSavingEdit by remember { mutableStateOf(false) }
+
+    AlertDialog(
+      onDismissRequest = { editingNotification = null },
+      title = { Text("Edit Notification", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+      text = {
+        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+          OutlinedTextField(
+            value = editTitle,
+            onValueChange = { editTitle = it },
+            label = { Text("Title") },
+            modifier = Modifier.fillMaxWidth()
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          OutlinedTextField(
+            value = editMessage,
+            onValueChange = { editMessage = it },
+            label = { Text("Message") },
+            modifier = Modifier.fillMaxWidth().height(110.dp)
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            if (editTitle.isNotBlank() && editMessage.isNotBlank()) {
+              isSavingEdit = true
+              adminViewModel.editNotification(
+                id = notif.id,
+                title = editTitle.trim(),
+                message = editMessage.trim(),
+                category = editCategory,
+                priority = editPriority,
+                target = editTarget
+              ) {
+                isSavingEdit = false
+                editingNotification = null
+              }
+            }
+          },
+          enabled = !isSavingEdit && editTitle.isNotBlank() && editMessage.isNotBlank()
+        ) {
+          Text(if (isSavingEdit) "Saving..." else "Save Changes")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { editingNotification = null }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+
+  // 4. Delete Notification Confirmation Dialog
+  deletingNotificationId?.let { id ->
+    AlertDialog(
+      onDismissRequest = { deletingNotificationId = null },
+      title = { Text("Delete Notification?", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+      text = {
+        Text("This will permanently remove the notification from both the cloud database and all student inboxes. This action cannot be undone.")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            adminViewModel.deleteNotification(id) {
+              deletingNotificationId = null
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+        ) {
+          Text("Delete For Everyone")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { deletingNotificationId = null }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 }
 

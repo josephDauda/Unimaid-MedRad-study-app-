@@ -25,7 +25,10 @@ data class QuestionEntity(
   val imageUrl: String? = null,
   val timeLimitSeconds: Int = 60,
   val marks: Int = 1,
-  val createdAt: Long = System.currentTimeMillis()
+  val createdAt: Long = System.currentTimeMillis(),
+  val remoteId: String? = null,
+  val remoteExamId: String? = null,
+  val remoteCourseId: String? = null
 )
 
 @Entity(tableName = "exams")
@@ -39,7 +42,9 @@ data class ExamEntity(
   val totalQuestions: Int = 15,
   val isPremium: Boolean = false,
   val isPublished: Boolean = true,
-  val createdAt: Long = System.currentTimeMillis()
+  val createdAt: Long = System.currentTimeMillis(),
+  val remoteId: String? = null,
+  val remoteCourseId: String? = null
 )
 
 @Entity(tableName = "exam_attempts")
@@ -57,7 +62,10 @@ data class ExamAttemptEntity(
   val unansweredQuestions: Int,
   val timeSpentSeconds: Int,
   val answersJson: String, // JSON mapping questionId to chosen option & correctness
-  val timestamp: Long = System.currentTimeMillis()
+  val timestamp: Long = System.currentTimeMillis(),
+  val remoteId: String? = null,
+  val remoteExamId: String? = null,
+  val remoteCourseId: String? = null
 )
 
 @Entity(tableName = "study_materials")
@@ -72,7 +80,9 @@ data class StudyMaterialEntity(
   val contentBody: String,
   val externalUrl: String? = null,
   val isPremium: Boolean = false,
-  val createdAt: Long = System.currentTimeMillis()
+  val createdAt: Long = System.currentTimeMillis(),
+  val remoteId: String? = null,
+  val remoteCourseId: String? = null
 )
 
 @Entity(tableName = "course_libraries")
@@ -85,7 +95,9 @@ data class CourseLibraryEntity(
   val description: String, // e.g. "Lecture notes and study resources"
   val externalUrl: String, // Google Drive URL or external resource link
   val isPublished: Boolean = true,
-  val createdAt: Long = System.currentTimeMillis()
+  val createdAt: Long = System.currentTimeMillis(),
+  val remoteId: String? = null,
+  val remoteCourseId: String? = null
 )
 
 @Entity(tableName = "subscriptions")

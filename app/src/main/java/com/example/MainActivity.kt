@@ -72,6 +72,13 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  override fun onResume() {
+    super.onResume()
+    lifecycleScope.launch {
+      appContainer.cloudSyncManager.pullLatestFromCloud()
+    }
+  }
+
   override fun onPause() {
     try {
       activeActionMode?.finish()

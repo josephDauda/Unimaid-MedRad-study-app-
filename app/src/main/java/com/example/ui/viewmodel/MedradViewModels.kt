@@ -189,7 +189,8 @@ class DashboardViewModel(
   private val cbtRepository: CbtRepository,
   private val academicRepository: AcademicRepository,
   private val subscriptionRepository: SubscriptionRepository,
-  private val cloudSyncManager: com.example.data.sync.CloudSyncManager? = null
+  private val cloudSyncManager: com.example.data.sync.CloudSyncManager? = null,
+  val notificationRepository: com.example.data.repository.NotificationRepository? = null
 ) : ViewModel() {
   private val _dailyAllowance = MutableStateFlow(15)
   val dailyAllowance: StateFlow<Int> = _dailyAllowance.asStateFlow()
@@ -551,7 +552,8 @@ class SubscriptionViewModel(
 class AdminViewModel(
   private val adminRepository: AdminRepository,
   private val academicRepository: AcademicRepository,
-  private val cloudSyncManager: com.example.data.sync.CloudSyncManager? = null
+  private val cloudSyncManager: com.example.data.sync.CloudSyncManager? = null,
+  val notificationRepository: com.example.data.repository.NotificationRepository? = null
 ) : ViewModel() {
   private val _stats = MutableStateFlow(AdminDashboardStats())
   val stats: StateFlow<AdminDashboardStats> = _stats.asStateFlow()
@@ -560,6 +562,10 @@ class AdminViewModel(
   val lastSyncReport = cloudSyncManager?.lastSyncReport ?: MutableStateFlow(null)
   val cloudStatusMessage = cloudSyncManager?.cloudStatusMessage ?: MutableStateFlow("Ready")
   val announcements = cloudSyncManager?.announcements ?: MutableStateFlow(emptyList())
+
+  val allAdminNotifications = notificationRepository?.getAllAdminNotificationsFlow()
+    ?.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    ?: MutableStateFlow(emptyList())
 
   val allQuestions = academicRepository.getAllQuestions()
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -630,10 +636,77 @@ class AdminViewModel(
     }
   }
 
-  fun sendPushNotification(title: String, message: String, target: String, priority: String, onDone: () -> Unit = {}) {
+  fun broadcastNotification(
+    title: String,
+    message: String,
+    category: String,
+    priority: String,
+    target: String,
+    author: String = "Department of Medical Radiography",
+    onResult: (Result<com.example.data.local.entity.NotificationEntity>) -> Unit
+  ) {
     viewModelScope.launch {
-      cloudSyncManager?.sendPushNotification(title, message, target, priority)
-      onDone()
+      val res = notificationRepository?.publishNotification(
+        title = title,
+        message = message,
+        category = category,
+        priority = priority,
+        target = target,
+        author = author
+      ) ?: cloudSyncManager?.broadcastAnnouncement(title, message, priority, author, target)?.map {
+        com.example.data.local.entity.NotificationEntity(
+          id = java.util.UUID.randomUUID().toString(),
+          title = title,
+          message = message,
+          category = category,
+          priority = priority,
+          target = target,
+          author = author
+        )
+      } ?: Result.failure(Exception("Notification service unavailable"))
+      onResult(res)
+    }
+  }
+
+  fun editNotification(
+    id: String,
+    title: String,
+    message: String,
+    category: String,
+    priority: String,
+    target: String,
+    onResult: (Result<Boolean>) -> Unit
+  ) {
+    viewModelScope.launch {
+      val res = notificationRepository?.editNotification(id, title, message, category, priority, target)
+        ?: Result.failure(Exception("Notification service unavailable"))
+      onResult(res)
+    }
+  }
+
+  fun deleteNotification(
+    id: String,
+    onResult: (Result<Boolean>) -> Unit
+  ) {
+    viewModelScope.launch {
+      val res = notificationRepository?.deleteNotification(id)
+        ?: cloudSyncManager?.deleteAnnouncement(id)
+        ?: Result.failure(Exception("Notification service unavailable"))
+      onResult(res)
+    }
+  }
+
+  fun sendPushNotification(title: String, message: String, target: String, priority: String, onDone: (Result<Boolean>) -> Unit = {}) {
+    viewModelScope.launch {
+      val res = notificationRepository?.publishNotification(
+        title = title,
+        message = message,
+        category = if (priority.contains("Exam", ignoreCase = true)) "Exam Alert" else "General Announcement",
+        priority = priority,
+        target = target
+      )?.map { true } ?: cloudSyncManager?.sendPushNotification(title, message, target, priority)
+      ?: Result.failure(Exception("Cloud sync unavailable"))
+      onDone(res)
     }
   }
 

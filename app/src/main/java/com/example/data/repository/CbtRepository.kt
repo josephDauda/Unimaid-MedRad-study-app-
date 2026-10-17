@@ -117,21 +117,107 @@ class CbtRepository(
     return withContext(Dispatchers.IO) {
       val attemptId = examDao.insertAttempt(attempt)
 
-      // Sync attempt to Supabase
+      // Sync attempt to Supabase with authentic UUIDs and backend functions
       supabaseClient?.let { client ->
         scope.launch {
           try {
-            val isPassed = (attempt.score * 100) / maxOf(attempt.totalQuestions, 1) >= 50
-            val dto = SupabaseExamAttempt(
-              userId = client.getUserId() ?: "user_${attempt.userId}",
-              courseId = attempt.examId ?: 1L,
-              score = attempt.score,
-              totalQuestions = attempt.totalQuestions,
-              timeSpentSeconds = attempt.timeSpentSeconds,
-              isPassed = isPassed
-            )
-            val json = client.moshi.adapter(SupabaseExamAttempt::class.java).toJson(dto)
-            client.restPost("exam_attempts", json, upsert = false)
+            val examEntity = attempt.examId?.let { examDao.getExamById(it) }
+            val remoteExamId = examEntity?.remoteId
+            val remoteCourseId = examEntity?.remoteCourseId
+            val supabaseUid = client.getUserId()
+
+            // Only attempt remote sync if user has authenticated Supabase UUID
+            val isValidUuid = supabaseUid != null && supabaseUid.length == 36 && supabaseUid.count { it == '-' } == 4
+            if (!isValidUuid || remoteExamId.isNullOrBlank()) {
+              Log.i(tag, "Attempt $attemptId saved locally in Room. Cloud sync requires valid Supabase user session & exam UUID.")
+              return@launch
+            }
+
+            var remoteAttemptId: String? = null
+
+            // 1. Attempt official RPC flow: start_exam_attempt -> save_exam_answer -> submit_exam_attempt
+            val startPayload = org.json.JSONObject().apply {
+              put("p_exam_id", remoteExamId)
+            }
+            val startRes = client.callRpc("start_exam_attempt", startPayload.toString())
+            if (startRes.isSuccess) {
+              val startJson = startRes.getOrNull() ?: ""
+              remoteAttemptId = try {
+                if (startJson.startsWith("{")) {
+                  val obj = org.json.JSONObject(startJson)
+                  obj.optString("id").ifBlank { obj.optString("attempt_id") }
+                } else {
+                  startJson.replace("\"", "").trim()
+                }
+              } catch (_: Exception) { null }
+
+              if (!remoteAttemptId.isNullOrBlank()) {
+                // Save individual answers if available
+                try {
+                  val answersObj = org.json.JSONObject(attempt.answersJson)
+                  val keys = answersObj.keys()
+                  while (keys.hasNext()) {
+                    val qKey = keys.next()
+                    val qObj = answersObj.optJSONObject(qKey) ?: continue
+                    val chosen = qObj.optString("chosen")
+                    val qLocalId = qKey.toLongOrNull() ?: continue
+                    val qRemote = questionDao.getQuestionById(qLocalId)?.remoteId
+                    if (!qRemote.isNullOrBlank() && chosen.isNotBlank()) {
+                      val ansPayload = org.json.JSONObject().apply {
+                        put("p_attempt_id", remoteAttemptId)
+                        put("p_question_id", qRemote)
+                        put("p_selected_option", chosen)
+                      }
+                      client.callRpc("save_exam_answer", ansPayload.toString())
+                    }
+                  }
+                } catch (e: Exception) {
+                  Log.w(tag, "Notice saving question answers via RPC: ${e.message}")
+                }
+
+                // Complete submission
+                val submitPayload = org.json.JSONObject().apply {
+                  put("p_attempt_id", remoteAttemptId)
+                }
+                client.callRpc("submit_exam_attempt", submitPayload.toString())
+              }
+            }
+
+            // 2. Direct table upsert fallback with matching Supabase schema columns
+            if (remoteAttemptId.isNullOrBlank()) {
+              val generatedAttemptId = java.util.UUID.randomUUID().toString()
+              val isPassed = (attempt.score * 100) / maxOf(attempt.totalQuestions, 1) >= 50
+              val tablePayload = org.json.JSONObject().apply {
+                put("id", generatedAttemptId)
+                put("user_id", supabaseUid)
+                put("student_id", supabaseUid)
+                put("exam_id", remoteExamId)
+                if (!remoteCourseId.isNullOrBlank()) {
+                  put("course_id", remoteCourseId)
+                }
+                put("score", attempt.score)
+                put("total_questions", attempt.totalQuestions)
+                put("duration_seconds", attempt.timeSpentSeconds)
+                put("status", "COMPLETED")
+                put("passed", isPassed)
+                put("percentage", attempt.score.toDouble())
+              }
+              val directRes = client.restPost("exam_attempts", tablePayload.toString(), upsert = false)
+              if (directRes.isSuccess) {
+                remoteAttemptId = generatedAttemptId
+              }
+            }
+
+            if (!remoteAttemptId.isNullOrBlank()) {
+              val updatedAttempt = attempt.copy(
+                id = attemptId,
+                remoteId = remoteAttemptId,
+                remoteExamId = remoteExamId,
+                remoteCourseId = remoteCourseId
+              )
+              examDao.insertAttempt(updatedAttempt)
+              Log.i(tag, "Exam attempt synced successfully with remoteId $remoteAttemptId")
+            }
           } catch (e: Exception) {
             Log.w(tag, "Supabase attempt sync notice: ${e.message}")
           }

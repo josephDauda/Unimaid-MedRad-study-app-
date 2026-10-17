@@ -37,7 +37,8 @@ data class CourseEntity(
   val title: String, // e.g. "Introduction to Radiography"
   val level: String, // e.g. "100 Level"
   val semester: String, // e.g. "First Semester"
-  val description: String = ""
+  val description: String = "",
+  val remoteId: String? = null
 )
 
 @Entity(tableName = "topics")

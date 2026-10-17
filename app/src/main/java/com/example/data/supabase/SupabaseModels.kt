@@ -28,6 +28,7 @@ data class SupabaseCourse(
   val level: String? = null,
   val semester: String? = null,
   val description: String? = null,
+  @Json(name = "is_published") val isPublished: Boolean = true,
   @Json(name = "created_at") val createdAt: String? = null,
   @Json(name = "updated_at") val updatedAt: String? = null
 )
@@ -72,8 +73,38 @@ data class SupabaseAnnouncement(
   val author: String? = null,
   val priority: String = "Normal",
   val target: String? = null,
+  val category: String? = null,
+  @Json(name = "sender_id") val senderId: String? = null,
+  @Json(name = "is_published") val isPublished: Boolean = true,
   @Json(name = "created_at") val createdAt: String? = null,
   @Json(name = "updated_at") val updatedAt: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseNotificationItem(
+  val id: String,
+  val title: String,
+  val message: String,
+  val priority: String = "Normal",
+  val category: String? = null,
+  val target: String? = null,
+  @Json(name = "recipient_id") val recipientId: String? = null,
+  @Json(name = "sender_id") val senderId: String? = null,
+  @Json(name = "is_read") val isRead: Boolean = false,
+  @Json(name = "read_at") val readAt: String? = null,
+  @Json(name = "is_published") val isPublished: Boolean = true,
+  @Json(name = "created_at") val createdAt: String? = null,
+  @Json(name = "updated_at") val updatedAt: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseNotificationRead(
+  val id: String? = null,
+  @Json(name = "notification_id") val notificationId: String,
+  @Json(name = "user_id") val userId: String,
+  @Json(name = "is_read") val isRead: Boolean = true,
+  @Json(name = "is_dismissed") val isDismissed: Boolean = false,
+  @Json(name = "read_at") val readAt: String? = null
 )
 
 @JsonClass(generateAdapter = true)

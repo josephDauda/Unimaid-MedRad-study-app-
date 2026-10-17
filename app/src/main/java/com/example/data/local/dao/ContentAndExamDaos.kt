@@ -34,6 +34,12 @@ interface QuestionDao {
   @Query("SELECT * FROM questions WHERE id = :id LIMIT 1")
   suspend fun getQuestionById(id: Long): QuestionEntity?
 
+  @Query("SELECT * FROM questions WHERE remoteId = :remoteId LIMIT 1")
+  suspend fun getQuestionByRemoteId(remoteId: String): QuestionEntity?
+
+  @Query("SELECT * FROM questions WHERE remoteExamId = :remoteExamId ORDER BY id ASC")
+  suspend fun getQuestionsByRemoteExamId(remoteExamId: String): List<QuestionEntity>
+
   @Query("SELECT * FROM questions WHERE id IN (:ids) AND isPublished = 1 ORDER BY id ASC")
   suspend fun getQuestionsByIds(ids: List<Long>): List<QuestionEntity>
 
@@ -73,6 +79,9 @@ interface ExamDao {
   @Query("SELECT * FROM exams WHERE id = :id LIMIT 1")
   suspend fun getExamById(id: Long): ExamEntity?
 
+  @Query("SELECT * FROM exams WHERE remoteId = :remoteId LIMIT 1")
+  suspend fun getExamByRemoteId(remoteId: String): ExamEntity?
+
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun insertExam(exam: ExamEntity): Long
 
@@ -110,6 +119,9 @@ interface ExamDao {
   @Query("SELECT * FROM exam_attempts WHERE id = :attemptId LIMIT 1")
   suspend fun getAttemptById(attemptId: Long): ExamAttemptEntity?
 
+  @Query("SELECT * FROM exam_attempts WHERE remoteId = :remoteId LIMIT 1")
+  suspend fun getAttemptByRemoteId(remoteId: String): ExamAttemptEntity?
+
   @Query("SELECT COUNT(*) FROM exam_attempts")
   suspend fun getTotalAttemptsCount(): Int
 
@@ -127,6 +139,9 @@ interface StudyMaterialDao {
 
   @Query("SELECT * FROM study_materials WHERE id = :id LIMIT 1")
   suspend fun getMaterialById(id: Long): StudyMaterialEntity?
+
+  @Query("SELECT * FROM study_materials WHERE remoteId = :remoteId LIMIT 1")
+  suspend fun getMaterialByRemoteId(remoteId: String): StudyMaterialEntity?
 
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun insertMaterial(material: StudyMaterialEntity): Long
@@ -181,6 +196,9 @@ interface CourseLibraryDao {
 
   @Query("SELECT * FROM course_libraries WHERE id = :id LIMIT 1")
   suspend fun getLibraryById(id: Long): CourseLibraryEntity?
+
+  @Query("SELECT * FROM course_libraries WHERE remoteId = :remoteId LIMIT 1")
+  suspend fun getLibraryByRemoteId(remoteId: String): CourseLibraryEntity?
 
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun insertLibrary(library: CourseLibraryEntity): Long

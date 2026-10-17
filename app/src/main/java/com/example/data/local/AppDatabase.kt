@@ -8,6 +8,7 @@ import com.example.data.local.dao.AcademicDao
 import com.example.data.local.dao.CourseLibraryDao
 import com.example.data.local.dao.DailyUsageDao
 import com.example.data.local.dao.ExamDao
+import com.example.data.local.dao.NotificationDao
 import com.example.data.local.dao.QuestionDao
 import com.example.data.local.dao.StudyMaterialDao
 import com.example.data.local.dao.SubscriptionDao
@@ -19,6 +20,8 @@ import com.example.data.local.entity.DepartmentEntity
 import com.example.data.local.entity.ExamAttemptEntity
 import com.example.data.local.entity.ExamEntity
 import com.example.data.local.entity.FacultyEntity
+import com.example.data.local.entity.NotificationEntity
+import com.example.data.local.entity.NotificationReadStatusEntity
 import com.example.data.local.entity.QuestionEntity
 import com.example.data.local.entity.StudyMaterialEntity
 import com.example.data.local.entity.SubscriptionEntity
@@ -40,9 +43,11 @@ import com.example.data.local.entity.UserEntity
     ExamAttemptEntity::class,
     StudyMaterialEntity::class,
     SubscriptionEntity::class,
-    CourseLibraryEntity::class
+    CourseLibraryEntity::class,
+    NotificationEntity::class,
+    NotificationReadStatusEntity::class
   ],
-  version = 2,
+  version = 4,
   exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -54,10 +59,55 @@ abstract class AppDatabase : RoomDatabase() {
   abstract fun studyMaterialDao(): StudyMaterialDao
   abstract fun subscriptionDao(): SubscriptionDao
   abstract fun courseLibraryDao(): CourseLibraryDao
+  abstract fun notificationDao(): NotificationDao
 
   companion object {
     @Volatile
     private var INSTANCE: AppDatabase? = null
+
+    val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        try {
+          db.execSQL("ALTER TABLE courses ADD COLUMN remoteId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE exams ADD COLUMN remoteId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE exams ADD COLUMN remoteCourseId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE questions ADD COLUMN remoteId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE questions ADD COLUMN remoteExamId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE questions ADD COLUMN remoteCourseId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE study_materials ADD COLUMN remoteId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE study_materials ADD COLUMN remoteCourseId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE course_libraries ADD COLUMN remoteId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE course_libraries ADD COLUMN remoteCourseId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE exam_attempts ADD COLUMN remoteId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE exam_attempts ADD COLUMN remoteExamId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+        try {
+          db.execSQL("ALTER TABLE exam_attempts ADD COLUMN remoteCourseId TEXT DEFAULT NULL")
+        } catch (_: Exception) {}
+      }
+    }
 
     fun getDatabase(context: Context): AppDatabase {
       return INSTANCE ?: synchronized(this) {
@@ -66,6 +116,7 @@ abstract class AppDatabase : RoomDatabase() {
           AppDatabase::class.java,
           "medrad_studysquad_database"
         )
+          .addMigrations(MIGRATION_3_4)
           .fallbackToDestructiveMigration(dropAllTables = true)
           .build()
         INSTANCE = instance
