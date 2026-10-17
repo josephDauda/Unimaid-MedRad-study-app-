@@ -23,8 +23,8 @@ data class SupabaseProfile(
 data class SupabaseCourse(
   val id: Any, // Can be Long, Int, or UUID String from Supabase
   @Json(name = "department_id") val departmentId: Any? = null,
-  val code: String,
-  val title: String,
+  val code: String? = null,
+  val title: String? = null,
   val level: String? = null,
   val semester: String? = null,
   val description: String? = null,
@@ -36,9 +36,9 @@ data class SupabaseCourse(
 @JsonClass(generateAdapter = true)
 data class SupabaseStudyMaterial(
   val id: Any, // Can be Long, Int, or UUID String from Supabase
-  @Json(name = "course_id") val courseId: Any,
+  @Json(name = "course_id") val courseId: Any? = null,
   @Json(name = "topic_id") val topicId: Any? = null,
-  val title: String,
+  val title: String? = null,
   val description: String? = null,
   @Json(name = "content_type") val contentType: String? = null,
   @Json(name = "content_body") val contentBody: String? = null,
@@ -53,7 +53,7 @@ data class SupabaseStudyMaterial(
 @JsonClass(generateAdapter = true)
 data class SupabaseCourseLibrary(
   val id: Any, // Can be Long, Int, or UUID String from Supabase
-  @Json(name = "course_id") val courseId: Any,
+  @Json(name = "course_id") val courseId: Any? = null,
   @Json(name = "course_code") val courseCode: String? = null,
   val name: String? = null,
   val title: String? = null,
@@ -68,8 +68,8 @@ data class SupabaseCourseLibrary(
 @JsonClass(generateAdapter = true)
 data class SupabaseAnnouncement(
   val id: String,
-  val title: String,
-  val message: String,
+  val title: String? = null,
+  val message: String? = null,
   val author: String? = null,
   val priority: String = "Normal",
   val target: String? = null,
@@ -83,8 +83,8 @@ data class SupabaseAnnouncement(
 @JsonClass(generateAdapter = true)
 data class SupabaseNotificationItem(
   val id: String,
-  val title: String,
-  val message: String,
+  val title: String? = null,
+  val message: String? = null,
   val priority: String = "Normal",
   val category: String? = null,
   val target: String? = null,
@@ -110,12 +110,12 @@ data class SupabaseNotificationRead(
 @JsonClass(generateAdapter = true)
 data class SupabaseExam(
   val id: Any, // Can be Long, Int, or UUID String from Supabase
-  @Json(name = "course_id") val courseId: Any,
-  val title: String,
+  @Json(name = "course_id") val courseId: Any? = null,
+  val title: String? = null,
   val description: String? = null,
   @Json(name = "duration_minutes") val durationMinutes: Int? = null,
   @Json(name = "total_marks") val totalMarks: Int? = null,
-  @Json(name = "pass_mark") val passMark: Int? = 50,
+  @Json(name = "pass_mark") val passMark: Double? = 50.0,
   @Json(name = "pass_percentage") val passPercentage: Int? = null,
   @Json(name = "is_published") val isPublished: Boolean = true,
   @Json(name = "created_at") val createdAt: String? = null,
@@ -128,17 +128,17 @@ data class SupabaseQuestion(
   @Json(name = "exam_id") val examId: Any? = null,
   @Json(name = "course_id") val courseId: Any? = null,
   @Json(name = "topic_id") val topicId: Any? = null,
-  @Json(name = "question_text") val questionText: String,
-  @Json(name = "option_a") val optionA: String,
-  @Json(name = "option_b") val optionB: String,
-  @Json(name = "option_c") val optionC: String,
-  @Json(name = "option_d") val optionD: String,
+  @Json(name = "question_text") val questionText: String? = null,
+  @Json(name = "option_a") val optionA: String? = null,
+  @Json(name = "option_b") val optionB: String? = null,
+  @Json(name = "option_c") val optionC: String? = null,
+  @Json(name = "option_d") val optionD: String? = null,
   @Json(name = "correct_answer") val correctAnswer: String? = null,
   val explanation: String? = "",
   val difficulty: String? = null,
   @Json(name = "question_type") val questionType: String? = "MULTIPLE_CHOICE",
   @Json(name = "assessment_title") val assessmentTitle: String? = null,
-  val marks: Int? = 1,
+  val marks: Double? = 1.0,
   @Json(name = "time_limit_seconds") val timeLimitSeconds: Int? = null,
   @Json(name = "image_url") val imageUrl: String? = null,
   @Json(name = "is_active") val isActive: Boolean = true,

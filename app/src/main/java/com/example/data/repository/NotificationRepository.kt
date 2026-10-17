@@ -164,13 +164,15 @@ class NotificationRepository(
           val entities = list.map { ann ->
             val createdTs = parseTimestamp(ann.createdAt)
             val updatedTs = parseTimestamp(ann.updatedAt)
+            val annTitle = ann.title ?: "Notice"
+            val annMsg = ann.message ?: ""
             NotificationEntity(
               id = ann.id,
-              title = ann.title,
-              message = ann.message,
-              category = ann.category ?: extractCategoryFromTitleOrPriority(ann.title, ann.priority),
+              title = annTitle,
+              message = annMsg,
+              category = ann.category ?: extractCategoryFromTitleOrPriority(annTitle, ann.priority),
               priority = ann.priority,
-              target = ann.target ?: extractTargetFromTitleOrMessage(ann.title, ann.message),
+              target = ann.target ?: extractTargetFromTitleOrMessage(annTitle, annMsg),
               author = ann.author ?: "Department of Medical Radiography",
               senderId = ann.senderId,
               recipientId = null,
@@ -201,10 +203,12 @@ class NotificationRepository(
           val entities = list.map { item ->
             val createdTs = parseTimestamp(item.createdAt)
             val updatedTs = parseTimestamp(item.updatedAt)
+            val itemTitle = item.title ?: "Notification"
+            val itemMsg = item.message ?: ""
             NotificationEntity(
               id = item.id,
-              title = item.title,
-              message = item.message,
+              title = itemTitle,
+              message = itemMsg,
               category = item.category ?: "General Announcement",
               priority = item.priority,
               target = item.target ?: "All Students",

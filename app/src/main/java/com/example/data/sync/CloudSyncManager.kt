@@ -424,11 +424,11 @@ class CloudSyncManager(
                 id = id,
                 courseId = localCourseId,
                 topicId = parseJsonId(record, "topic_id", 1L),
-                questionText = record.optString("question_text"),
-                optionA = record.optString("option_a", ""),
-                optionB = record.optString("option_b", ""),
-                optionC = record.optString("option_c", ""),
-                optionD = record.optString("option_d", ""),
+                questionText = if (record.isNull("question_text")) "" else record.optString("question_text", ""),
+                optionA = if (record.isNull("option_a")) "" else record.optString("option_a", ""),
+                optionB = if (record.isNull("option_b")) "" else record.optString("option_b", ""),
+                optionC = if (record.isNull("option_c")) "" else record.optString("option_c", ""),
+                optionD = if (record.isNull("option_d")) "" else record.optString("option_d", ""),
                 correctAnswer = record.optString("correct_answer", "A"),
                 explanation = record.optString("explanation", "Refer to clinical radiology modules for verified rationale."),
                 difficulty = record.optString("difficulty", "Medium"),
@@ -652,119 +652,8 @@ class CloudSyncManager(
               .apply()
           }
         }
-        "study_materials" -> {
-          val title = record.optString("title")
-          val courseId = parseJsonId(record, "course_id", 1L)
-          val id = parseJsonId(record, "id", System.currentTimeMillis())
-          if (title.isNotBlank()) {
-            val entity = StudyMaterialEntity(
-              id = id,
-              courseId = courseId,
-              topicId = parseJsonId(record, "topic_id", 1L),
-              title = title,
-              description = record.optString("description", ""),
-              contentType = record.optString("content_type", "Lecture Note"),
-              contentBody = record.optString("content_body", ""),
-              externalUrl = record.optString("external_url").takeIf { it.isNotBlank() },
-              isPremium = record.optBoolean("is_premium", false)
-            )
-            database.studyMaterialDao().insertMaterial(entity)
-          }
-        }
-        "course_libraries" -> {
-          val name = record.optString("name")
-          val url = record.optString("external_url")
-          val id = parseJsonId(record, "id", System.currentTimeMillis())
-          if (name.isNotBlank() && url.isNotBlank()) {
-            val entity = CourseLibraryEntity(
-              id = id,
-              courseId = parseJsonId(record, "course_id", 1L),
-              courseCode = record.optString("course_code", "RAD 101"),
-              name = name,
-              description = record.optString("description", ""),
-              externalUrl = url,
-              isPublished = record.optBoolean("is_published", true)
-            )
-            database.courseLibraryDao().insertLibrary(entity)
-          }
-        }
         "student_feedback" -> {
           pullStudentFeedback()
-        }
-        "courses" -> {
-          if (eventType == "DELETE") {
-            val id = parseJsonId(record, "id", 0L)
-            if (id > 0) {
-              database.academicDao().getCourseById(id)?.let { database.academicDao().deleteCourse(it) }
-            }
-          } else if (record.has("code") && record.has("title")) {
-            val id = parseJsonId(record, "id", System.currentTimeMillis())
-            val entity = CourseEntity(
-              id = id,
-              departmentId = parseJsonId(record, "department_id", 1L),
-              code = record.optString("code"),
-              title = record.optString("title"),
-              level = record.optString("level", "100 Level"),
-              semester = record.optString("semester", "First Semester"),
-              description = record.optString("description", "")
-            )
-            database.academicDao().insertCourse(entity)
-          } else {
-            pullCourses()
-          }
-        }
-        "exams" -> {
-          if (eventType == "DELETE") {
-            val id = parseJsonId(record, "id", 0L)
-            if (id > 0) {
-              database.examDao().getExamById(id)?.let { database.examDao().deleteExam(it) }
-            }
-          } else if (record.has("title")) {
-            val id = parseJsonId(record, "id", System.currentTimeMillis())
-            val entity = ExamEntity(
-              id = id,
-              courseId = parseJsonId(record, "course_id", 1L),
-              title = record.optString("title"),
-              description = record.optString("description", ""),
-              durationMinutes = record.optInt("duration_minutes", 30),
-              totalQuestions = record.optInt("total_questions", 15),
-              isPremium = record.optBoolean("is_premium", false),
-              isPublished = record.optBoolean("is_published", true)
-            )
-            database.examDao().insertExam(entity)
-          } else {
-            pullExams()
-          }
-        }
-        "questions" -> {
-          if (eventType == "DELETE") {
-            val id = parseJsonId(record, "id", 0L)
-            if (id > 0) {
-              database.questionDao().getQuestionById(id)?.let { database.questionDao().deleteQuestion(it) }
-            }
-          } else if (record.has("question_text")) {
-            val id = parseJsonId(record, "id", System.currentTimeMillis())
-            val entity = QuestionEntity(
-              id = id,
-              courseId = parseJsonId(record, "course_id", 1L),
-              topicId = parseJsonId(record, "topic_id", 1L),
-              questionText = record.optString("question_text"),
-              optionA = record.optString("option_a", ""),
-              optionB = record.optString("option_b", ""),
-              optionC = record.optString("option_c", ""),
-              optionD = record.optString("option_d", ""),
-              correctAnswer = record.optString("correct_answer", "A"),
-              explanation = record.optString("explanation", ""),
-              difficulty = record.optString("difficulty", "Medium"),
-              isPremium = record.optBoolean("is_premium", false),
-              isPublished = record.optBoolean("is_published", true),
-              isDemo = record.optBoolean("is_demo", false)
-            )
-            database.questionDao().insertQuestion(entity)
-          } else {
-            val courseId = parseJsonId(record, "course_id", 0L).takeIf { it > 0 }
-            pullQuestions(courseId)
-          }
         }
       }
     }
@@ -835,8 +724,8 @@ class CloudSyncManager(
         val mapped = list.map {
           CloudAnnouncement(
             id = it.id,
-            title = it.title,
-            message = it.message,
+            title = it.title ?: "Notice",
+            message = it.message ?: "",
             author = it.author ?: "Department of Medical Radiography",
             priority = it.priority,
             target = it.target ?: "All Students",
@@ -848,8 +737,8 @@ class CloudSyncManager(
         val entities = list.map {
           com.example.data.local.entity.NotificationEntity(
             id = it.id,
-            title = it.title,
-            message = it.message,
+            title = it.title ?: "Notice",
+            message = it.message ?: "",
             category = it.category ?: if (it.priority.contains("Exam", ignoreCase = true)) "Exam Alert" else "General Announcement",
             priority = it.priority,
             target = it.target ?: "All Students",
@@ -883,7 +772,7 @@ class CloudSyncManager(
             studentName = it.studentName ?: "Student",
             studentEmail = it.studentEmail ?: "",
             category = it.subject ?: it.category ?: "Academic Inquiry",
-            message = it.message,
+            message = it.message ?: "",
             timestamp = System.currentTimeMillis()
           )
         }
@@ -921,8 +810,8 @@ class CloudSyncManager(
               CourseEntity(
                 id = localId,
                 departmentId = FlexibleIdHelper.toPositiveLong(c.departmentId, 1L),
-                code = c.code,
-                title = c.title,
+                code = c.code ?: "RAD 101",
+                title = c.title ?: "Academic Course",
                 level = c.level ?: "100 Level",
                 semester = c.semester ?: "First Semester",
                 description = c.description ?: "",
@@ -975,7 +864,7 @@ class CloudSyncManager(
               ExamEntity(
                 id = localId,
                 courseId = localCourseId,
-                title = e.title,
+                title = e.title ?: "Examination",
                 description = e.description ?: "",
                 durationMinutes = e.durationMinutes ?: 30,
                 totalQuestions = maxOf((e.totalMarks ?: 30) / 2, 10),
@@ -1042,11 +931,11 @@ class CloudSyncManager(
                 id = localId,
                 courseId = localCourseId,
                 topicId = FlexibleIdHelper.toPositiveLong(q.topicId, 1L),
-                questionText = q.questionText,
-                optionA = q.optionA,
-                optionB = q.optionB,
-                optionC = q.optionC,
-                optionD = q.optionD,
+                questionText = q.questionText ?: "",
+                optionA = q.optionA ?: "",
+                optionB = q.optionB ?: "",
+                optionC = q.optionC ?: "",
+                optionD = q.optionD ?: "",
                 correctAnswer = q.correctAnswer ?: "A",
                 explanation = q.explanation ?: "Refer to clinical radiology modules for verified rationale.",
                 difficulty = q.difficulty ?: "Medium",
@@ -1055,7 +944,7 @@ class CloudSyncManager(
                 isDemo = q.isDemo ?: false,
                 questionType = q.questionType ?: "MULTIPLE_CHOICE",
                 assessmentTitle = q.assessmentTitle ?: "Continuous Assessment",
-                marks = q.marks ?: 1,
+                marks = (q.marks ?: 1.0).toInt(),
                 timeLimitSeconds = q.timeLimitSeconds ?: 60,
                 imageUrl = q.imageUrl,
                 remoteId = remoteUuid,
@@ -1117,7 +1006,7 @@ class CloudSyncManager(
                 id = localId,
                 courseId = localCourseId,
                 topicId = FlexibleIdHelper.toPositiveLong(m.topicId, 1L),
-                title = m.title,
+                title = m.title ?: "Study Material",
                 description = m.description ?: "",
                 contentType = m.contentType ?: "Lecture Note",
                 contentBody = m.contentBody ?: "",
@@ -1445,7 +1334,7 @@ class CloudSyncManager(
         val parentCourse = database.academicDao().getCourseById(q.courseId)
         val courseRemoteUuid = q.remoteCourseId ?: parentCourse?.remoteId
         val examRemoteUuid = q.remoteExamId
-        if (q.remoteId == null || q.remoteCourseId == null && courseRemoteUuid != null) {
+        if (q.remoteId == null || (q.remoteCourseId == null && courseRemoteUuid != null)) {
           database.questionDao().insertQuestion(q.copy(remoteId = qRemoteUuid, remoteCourseId = courseRemoteUuid))
         }
         val qPayload = JSONObject().apply {
@@ -1460,8 +1349,8 @@ class CloudSyncManager(
           put("question_text", q.questionText)
           put("option_a", q.optionA)
           put("option_b", q.optionB)
-          put("option_c", q.optionC)
-          put("option_d", q.optionD)
+          if (q.optionC.isNotBlank()) put("option_c", q.optionC) else put("option_c", JSONObject.NULL)
+          if (q.optionD.isNotBlank()) put("option_d", q.optionD) else put("option_d", JSONObject.NULL)
           put("correct_answer", q.correctAnswer)
           put("explanation", q.explanation)
           put("difficulty", q.difficulty)
@@ -1720,14 +1609,14 @@ class CloudSyncManager(
         questionText = q.questionText,
         optionA = q.optionA,
         optionB = q.optionB,
-        optionC = q.optionC,
-        optionD = q.optionD,
+        optionC = q.optionC.takeIf { it.isNotBlank() },
+        optionD = q.optionD.takeIf { it.isNotBlank() },
         correctAnswer = q.correctAnswer,
         explanation = q.explanation,
         difficulty = q.difficulty,
         questionType = if (q.questionType.equals("MULTIPLE_CHOICE", ignoreCase = true)) "mcq" else q.questionType,
         assessmentTitle = q.assessmentTitle,
-        marks = q.marks,
+        marks = q.marks.toDouble(),
         timeLimitSeconds = q.timeLimitSeconds,
         imageUrl = q.imageUrl,
         isPremium = q.isPremium,
