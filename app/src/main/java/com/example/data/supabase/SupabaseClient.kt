@@ -215,7 +215,16 @@ class SupabaseClient(private val context: Context) {
       val body = response.body?.string() ?: ""
       if (response.isSuccessful) {
         val adapter = moshi.adapter(SupabaseAuthResponse::class.java)
-        val authResp = adapter.fromJson(body)
+        var authResp = adapter.fromJson(body)
+        if (authResp != null && authResp.user == null) {
+          try {
+            val userAdapter = moshi.adapter(SupabaseAuthUser::class.java)
+            val topUser = userAdapter.fromJson(body)
+            if (topUser != null && topUser.id.isNotBlank()) {
+              authResp = authResp.copy(user = topUser)
+            }
+          } catch (_: Exception) {}
+        }
         if (authResp != null) {
           saveSession(authResp.accessToken, authResp.refreshToken, authResp.user?.id, authResp.expiresIn)
           Result.success(authResp)
@@ -251,7 +260,16 @@ class SupabaseClient(private val context: Context) {
       val body = response.body?.string() ?: ""
       if (response.isSuccessful) {
         val adapter = moshi.adapter(SupabaseAuthResponse::class.java)
-        val authResp = adapter.fromJson(body)
+        var authResp = adapter.fromJson(body)
+        if (authResp != null && authResp.user == null) {
+          try {
+            val userAdapter = moshi.adapter(SupabaseAuthUser::class.java)
+            val topUser = userAdapter.fromJson(body)
+            if (topUser != null && topUser.id.isNotBlank()) {
+              authResp = authResp.copy(user = topUser)
+            }
+          } catch (_: Exception) {}
+        }
         if (authResp != null) {
           saveSession(authResp.accessToken, authResp.refreshToken, authResp.user?.id, authResp.expiresIn)
           Result.success(authResp)

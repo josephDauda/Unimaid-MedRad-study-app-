@@ -273,63 +273,68 @@ class AuthRepository(private val context: Context, private val database: AppData
         return@withContext Result.failure(Exception("Please provide a valid Google/Gmail address."))
       }
 
-      // 1. Check if user already exists locally
+      // Check if user already exists in remote Supabase profiles
+      var existingRemoteProfile: SupabaseProfile? = null
+      try {
+        val checkRes = supabaseClient.restGet("profiles?email=eq.$trimmedEmail&select=*")
+        checkRes.onSuccess { json ->
+          val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, SupabaseProfile::class.java)
+          val list = supabaseClient.moshi.adapter<List<SupabaseProfile>>(type).fromJson(json)
+          existingRemoteProfile = list?.firstOrNull()
+        }
+      } catch (_: Exception) {}
+
+      val authRes = supabaseClient.authSignInWithGoogleAccount(trimmedEmail, fullName, idToken)
+      val authUser = authRes.getOrNull()?.user
+      val profileId = existingRemoteProfile?.id ?: authUser?.id ?: java.util.UUID.nameUUIDFromBytes("google:$trimmedEmail".toByteArray()).toString()
+      val verifiedRole = if (existingRemoteProfile?.appRole?.equals("admin", ignoreCase = true) == true || trimmedEmail == "admin@medrad.edu.ng") "ADMIN" else "STUDENT"
       var user = database.userDao().getUserByEmail(trimmedEmail)
-      val initialRole = if (trimmedEmail == "admin@medrad.edu.ng" || user?.role == "ADMIN") "ADMIN" else "STUDENT"
       if (user == null) {
         val newUser = UserEntity(
-          fullName = fullName.trim().ifBlank { "Radiography Scholar" },
+          fullName = existingRemoteProfile?.fullName ?: fullName.trim().ifBlank { "Radiography Scholar" },
           email = trimmedEmail,
           phoneNumber = "",
           passwordHash = "", // Never ask or store Google password
-          role = initialRole, // Default is strictly STUDENT; admin role is only assigned if verified in cloud profiles or seed admin
+          role = verifiedRole,
           university = "University of Maiduguri",
-          faculty = "College of Medical Sciences",
-          department = "Medical Radiography",
-          level = "100 Level",
+          faculty = existingRemoteProfile?.faculty ?: "College of Medical Sciences",
+          department = existingRemoteProfile?.department ?: "Medical Radiography",
+          level = existingRemoteProfile?.level ?: "100 Level",
           semester = "1st Semester",
-          isPremium = initialRole == "ADMIN"
+          isPremium = verifiedRole == "ADMIN"
         )
         val id = database.userDao().insertUser(newUser)
         user = newUser.copy(id = id)
-      } else if (initialRole == "ADMIN" && user.role != "ADMIN") {
-        user = user.copy(role = "ADMIN", isPremium = true)
-        database.userDao().updateUser(user)
+      } else {
+        val updated = user.copy(
+          fullName = existingRemoteProfile?.fullName ?: user.fullName,
+          role = verifiedRole,
+          isPremium = if (verifiedRole == "ADMIN") true else user.isPremium
+        )
+        database.userDao().updateUser(updated)
+        user = updated
       }
 
-      // Check premium expiry if applicable
       val updatedUser = checkAndUpdatePremiumExpiry(user)
-
-      // Persist local and Supabase session
       prefs.edit().putLong("logged_in_user_id", updatedUser.id).apply()
       _currentUser.value = updatedUser
 
-      // Connect with Supabase Auth using Google OAuth
-      val authRes = supabaseClient.authSignInWithGoogleAccount(trimmedEmail, updatedUser.fullName, idToken)
-      val authUser = authRes.getOrNull()?.user
-      val profileId = authUser?.id ?: "google_${updatedUser.id}"
-
-      // Synchronize/upsert profiles in Supabase
-      scope.launch {
-        try {
-          val profileDto = SupabaseProfile(
-            id = profileId,
-            fullName = updatedUser.fullName,
-            email = trimmedEmail,
-            level = updatedUser.level,
-            department = updatedUser.department,
-            faculty = updatedUser.faculty,
-            appRole = updatedUser.role,
-            isActive = true
-          )
-          val json = supabaseClient.moshi.adapter(SupabaseProfile::class.java).toJson(profileDto)
-          supabaseClient.restPost("profiles", json, upsert = true)
-
-          // Fetch if any existing remote profile overrides (e.g. admin role assigned in cloud)
-          syncProfileFromSupabase(trimmedEmail)
-        } catch (e: Exception) {
-          Log.w(tag, "Supabase profile sync notice on Google login: ${e.message}")
-        }
+      // Synchronize/upsert profiles in Supabase with verified UUID
+      try {
+        val profileDto = SupabaseProfile(
+          id = profileId,
+          fullName = updatedUser.fullName,
+          email = trimmedEmail,
+          level = updatedUser.level,
+          department = updatedUser.department,
+          faculty = updatedUser.faculty,
+          appRole = updatedUser.role,
+          isActive = true
+        )
+        val json = supabaseClient.moshi.adapter(SupabaseProfile::class.java).toJson(profileDto)
+        supabaseClient.restPost("profiles", json, upsert = true)
+      } catch (e: Exception) {
+        Log.w(tag, "Supabase profile sync notice on Google login: ${e.message}")
       }
 
       Result.success(updatedUser)
@@ -445,7 +450,18 @@ class AuthRepository(private val context: Context, private val database: AppData
           return@withContext Result.failure(Exception("Password must be at least 6 characters."))
         }
 
-        // 1. Authoritative Registration in Supabase Auth (cloud sync)
+        // Check if user already exists in remote Supabase profiles to preserve existing UUID and role
+        var existingRemoteProfile: SupabaseProfile? = null
+        try {
+          val profRes = supabaseClient.restGet("profiles?email=eq.$trimmedEmail&select=*")
+          profRes.onSuccess { json ->
+            val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, SupabaseProfile::class.java)
+            val list = supabaseClient.moshi.adapter<List<SupabaseProfile>>(type).fromJson(json)
+            existingRemoteProfile = list?.firstOrNull()
+          }
+        } catch (_: Exception) {}
+
+        // 1. Authoritative Registration in Supabase Auth
         val metadata = mapOf(
           "full_name" to fullName.trim(),
           "department" to department.trim(),
@@ -453,39 +469,49 @@ class AuthRepository(private val context: Context, private val database: AppData
           "level" to level.trim(),
           "phone" to phoneNumber.trim()
         )
-        var supabaseUserId = "sb_${System.currentTimeMillis()}"
+        var authUserId: String? = existingRemoteProfile?.id
         try {
           val authRes = supabaseClient.authSignUp(trimmedEmail, password, metadata)
           if (authRes.isSuccess) {
             val authResp = authRes.getOrThrow()
-            authResp.user?.id?.let { supabaseUserId = it }
-            supabaseClient.saveSession(authResp.accessToken, supabaseUserId)
+            authResp.user?.id?.let { authUserId = it }
+            supabaseClient.saveSession(authResp.accessToken, authResp.refreshToken, authUserId, authResp.expiresIn)
           } else {
-            val err = authRes.exceptionOrNull()?.message ?: ""
-            Log.w(tag, "Supabase signup notice (handling locally): $err")
+            // If already registered, attempt direct sign in to get active session
+            val signInRes = supabaseClient.authSignIn(trimmedEmail, password)
+            if (signInRes.isSuccess) {
+              val signResp = signInRes.getOrThrow()
+              signResp.user?.id?.let { authUserId = it }
+              supabaseClient.saveSession(signResp.accessToken, signResp.refreshToken, authUserId, signResp.expiresIn)
+            }
           }
         } catch (e: Exception) {
-          Log.w(tag, "Supabase signup exception: ${e.message}")
+          Log.w(tag, "Supabase signup notice: ${e.message}")
         }
 
-        // 2. Synchronize profile into Supabase profiles table with role STUDENT
-        scope.launch {
-          try {
-            val profileDto = SupabaseProfile(
-              id = supabaseUserId,
-              fullName = fullName.trim(),
-              email = trimmedEmail,
-              level = level.trim(),
-              department = department.trim(),
-              faculty = faculty.trim(),
-              appRole = if (trimmedEmail == "admin@medrad.edu.ng") "ADMIN" else "STUDENT",
-              isActive = true
-            )
-            val json = supabaseClient.moshi.adapter(SupabaseProfile::class.java).toJson(profileDto)
-            supabaseClient.restPost("profiles", json, upsert = true)
-          } catch (e: Exception) {
-            Log.w(tag, "Supabase profile creation notice: ${e.message}")
-          }
+        val resolvedUuid = authUserId
+          ?: existingRemoteProfile?.id
+          ?: java.util.UUID.nameUUIDFromBytes("supabase:$trimmedEmail".toByteArray()).toString()
+
+        val resolvedRole = if (trimmedEmail == "admin@medrad.edu.ng") "ADMIN"
+          else (existingRemoteProfile?.appRole?.uppercase() ?: "STUDENT")
+
+        // 2. Synchronize profile into Supabase profiles table with guaranteed valid UUID
+        try {
+          val profileDto = SupabaseProfile(
+            id = resolvedUuid,
+            fullName = fullName.trim(),
+            email = trimmedEmail,
+            level = level.trim(),
+            department = department.trim(),
+            faculty = faculty.trim(),
+            appRole = resolvedRole,
+            isActive = true
+          )
+          val json = supabaseClient.moshi.adapter(SupabaseProfile::class.java).toJson(profileDto)
+          supabaseClient.restPost("profiles", json, upsert = true)
+        } catch (e: Exception) {
+          Log.w(tag, "Supabase profile creation notice: ${e.message}")
         }
 
         // 3. Cache into Room for guaranteed local offline accessibility & instant APK access
@@ -563,7 +589,7 @@ class AuthRepository(private val context: Context, private val database: AppData
         scope.launch {
           try {
             val profileDto = SupabaseProfile(
-              id = supabaseClient.getUserId() ?: "user_${user.id}",
+              id = supabaseClient.getUserId() ?: java.util.UUID.nameUUIDFromBytes("supabase:${user.email}".toByteArray()).toString(),
               fullName = updated.fullName,
               email = updated.email,
               level = updated.level,

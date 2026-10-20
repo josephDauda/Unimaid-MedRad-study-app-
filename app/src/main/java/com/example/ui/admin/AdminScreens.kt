@@ -338,7 +338,10 @@ fun AdminDashboardScreen(
             onAddCourse = { showAddAcademicDialog = true },
             onDeleteCourse = { adminViewModel.deleteCourse(it) }
           )
-          "Students" -> AdminStudentsView(students = students)
+          "Students" -> AdminStudentsView(
+            students = students,
+            onRefresh = { adminViewModel.syncProfilesFromCloud() }
+          )
           "Score Export" -> AdminScoreExportView(adminViewModel = adminViewModel)
           "Global Card Theme" -> AdminGlobalCardStyleView(adminViewModel = adminViewModel)
           "About App Mgmt" -> AdminAboutAppView(adminViewModel = adminViewModel)
@@ -1348,14 +1351,35 @@ fun AdminAcademicSetupView(
 }
 
 @Composable
-fun AdminStudentsView(students: List<UserEntity>) {
+fun AdminStudentsView(
+  students: List<UserEntity>,
+  onRefresh: (() -> Unit)? = null
+) {
   Column(modifier = Modifier.fillMaxSize()) {
     Spacer(modifier = Modifier.height(12.dp))
-    Text(
-      text = "Enrolled Students (${students.size})",
-      style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-      color = MaterialTheme.colorScheme.onSurface
-    )
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Column {
+        Text(
+          text = "Enrolled Students (${students.size})",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+          text = "Real-time records synced from Supabase cloud",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
+      if (onRefresh != null) {
+        IconButton(onClick = onRefresh) {
+          Icon(Icons.Default.Sync, contentDescription = "Sync Profiles", tint = MaterialTheme.colorScheme.primary)
+        }
+      }
+    }
     Spacer(modifier = Modifier.height(10.dp))
 
     LazyColumn(

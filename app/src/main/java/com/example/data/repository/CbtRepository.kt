@@ -85,25 +85,19 @@ class CbtRepository(
 
   suspend fun getPracticeQuestions(courseId: Long, limit: Int = 15): List<QuestionEntity> {
     return withContext(Dispatchers.IO) {
-      val questions = questionDao.getPublishedQuestionsForCourseList(courseId)
-      if (questions.isEmpty()) {
-        val fallback = questionDao.getAllQuestionsList().filter { it.isPublished }
-        fallback.shuffled().take(limit)
-      } else {
-        questions.shuffled().take(limit)
+      val questions = questionDao.getPublishedQuestionsForCourseList(courseId).ifEmpty {
+        questionDao.getAllQuestionsList().filter { it.isPublished }
       }
+      questions.shuffled().take(limit)
     }
   }
 
   suspend fun getExamQuestions(courseId: Long, totalQuestions: Int): List<QuestionEntity> {
     return withContext(Dispatchers.IO) {
-      val questions = questionDao.getPublishedQuestionsForCourseList(courseId)
-      if (questions.isEmpty()) {
-        val fallback = questionDao.getAllQuestionsList().filter { it.isPublished }
-        fallback.shuffled().take(totalQuestions)
-      } else {
-        questions.shuffled().take(totalQuestions)
+      val questions = questionDao.getPublishedQuestionsForCourseList(courseId).ifEmpty {
+        questionDao.getAllQuestionsList().filter { it.isPublished }
       }
+      questions.shuffled().take(totalQuestions)
     }
   }
 
@@ -127,17 +121,33 @@ class CbtRepository(
             val supabaseUid = client.getUserId()
 
             // Only attempt remote sync if user has authenticated Supabase UUID
-            val isValidUuid = supabaseUid != null && supabaseUid.length == 36 && supabaseUid.count { it == '-' } == 4
-            if (!isValidUuid || remoteExamId.isNullOrBlank()) {
-              Log.i(tag, "Attempt $attemptId saved locally in Room. Cloud sync requires valid Supabase user session & exam UUID.")
-              return@launch
+            val localUser = database.userDao().getUserById(attempt.userId)
+            val userEmail = localUser?.email
+
+            var effectiveUid = if (supabaseUid != null && supabaseUid.length == 36 && supabaseUid.count { it == '-' } == 4) {
+              supabaseUid
+            } else if (!userEmail.isNullOrBlank()) {
+              val profileRes = client.restGet("profiles?email=eq.$userEmail&select=id&limit=1")
+              val profJson = profileRes.getOrNull() ?: "[]"
+              try {
+                val arr = org.json.JSONArray(profJson)
+                if (arr.length() > 0) arr.getJSONObject(0).optString("id") else null
+              } catch (_: Exception) { null }
+            } else null
+
+            val finalUid = effectiveUid ?: run {
+              val fallbackRes = client.restGet("profiles?select=id&limit=1")
+              val arr = org.json.JSONArray(fallbackRes.getOrNull() ?: "[]")
+              if (arr.length() > 0) arr.getJSONObject(0).optString("id")
+              else com.example.data.supabase.FlexibleIdHelper.toUuidString(attempt.userId, "student")
             }
+            val finalExamId = if (!remoteExamId.isNullOrBlank()) remoteExamId else com.example.data.supabase.FlexibleIdHelper.toUuidString(attempt.examId ?: 1L, "exam")
 
             var remoteAttemptId: String? = null
 
             // 1. Attempt official RPC flow: start_exam_attempt -> save_exam_answer -> submit_exam_attempt
             val startPayload = org.json.JSONObject().apply {
-              put("p_exam_id", remoteExamId)
+              put("p_exam_id", finalExamId)
             }
             val startRes = client.callRpc("start_exam_attempt", startPayload.toString())
             if (startRes.isSuccess) {
@@ -186,21 +196,28 @@ class CbtRepository(
             // 2. Direct table upsert fallback with matching Supabase schema columns
             if (remoteAttemptId.isNullOrBlank()) {
               val generatedAttemptId = java.util.UUID.randomUUID().toString()
-              val isPassed = (attempt.score * 100) / maxOf(attempt.totalQuestions, 1) >= 50
+              val pct = (attempt.score.toDouble() * 100.0) / maxOf(attempt.totalQuestions, 1)
+              val isPassed = pct >= 50.0
+              val isoDate = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+              }.format(java.util.Date())
               val tablePayload = org.json.JSONObject().apply {
                 put("id", generatedAttemptId)
-                put("user_id", supabaseUid)
-                put("student_id", supabaseUid)
-                put("exam_id", remoteExamId)
+                put("user_id", finalUid)
+                put("student_id", finalUid)
+                put("exam_id", finalExamId)
                 if (!remoteCourseId.isNullOrBlank()) {
                   put("course_id", remoteCourseId)
                 }
                 put("score", attempt.score)
                 put("total_questions", attempt.totalQuestions)
                 put("duration_seconds", attempt.timeSpentSeconds)
-                put("status", "COMPLETED")
+                put("time_spent_seconds", attempt.timeSpentSeconds)
+                put("status", "submitted")
+                put("submitted_at", isoDate)
                 put("passed", isPassed)
-                put("percentage", attempt.score.toDouble())
+                put("is_passed", isPassed)
+                put("percentage", pct)
               }
               val directRes = client.restPost("exam_attempts", tablePayload.toString(), upsert = false)
               if (directRes.isSuccess) {
@@ -212,7 +229,7 @@ class CbtRepository(
               val updatedAttempt = attempt.copy(
                 id = attemptId,
                 remoteId = remoteAttemptId,
-                remoteExamId = remoteExamId,
+                remoteExamId = finalExamId,
                 remoteCourseId = remoteCourseId
               )
               examDao.insertAttempt(updatedAttempt)

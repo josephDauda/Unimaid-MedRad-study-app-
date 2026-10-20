@@ -7,6 +7,7 @@ import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.data.local.entity.CourseEntity
 import com.example.data.local.entity.CourseLibraryEntity
+import com.example.data.local.entity.ExamAttemptEntity
 import com.example.data.local.entity.ExamEntity
 import com.example.data.local.entity.QuestionEntity
 import com.example.data.local.entity.StudyMaterialEntity
@@ -17,6 +18,8 @@ import com.example.data.supabase.SupabaseClient
 import com.example.data.supabase.SupabaseConfig
 import com.example.data.supabase.SupabaseCourse
 import com.example.data.supabase.SupabaseCourseLibrary
+import com.example.data.local.entity.UserEntity
+import com.example.data.supabase.SupabaseProfile
 import com.example.data.supabase.SupabaseExam
 import com.example.data.supabase.SupabaseQuestion
 import com.example.data.supabase.SupabaseRealtimeManager
@@ -275,130 +278,148 @@ class CloudSyncManager(
     realtimeManager = null
   }
 
+  fun parseTimestamp(ts: String?): Long {
+    if (ts.isNullOrBlank()) return System.currentTimeMillis()
+    val formats = listOf(
+      "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX",
+      "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+      "yyyy-MM-dd'T'HH:mm:ssXXX",
+      "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+      "yyyy-MM-dd'T'HH:mm:ss'Z'",
+      "yyyy-MM-dd HH:mm:ss"
+    )
+    for (fmt in formats) {
+      try {
+        val sdf = SimpleDateFormat(fmt, Locale.US)
+        val date = sdf.parse(ts)
+        if (date != null) return date.time
+      } catch (_: Exception) {}
+    }
+    return System.currentTimeMillis()
+  }
+
   fun handleRealtimeEvent(table: String, eventType: String, record: JSONObject) {
-    when (table) {
-      "announcements", "notifications" -> {
-        val title = record.optString("title")
-        val id = record.optString("id", java.util.UUID.randomUUID().toString())
-        if (eventType == "DELETE") {
-          _announcements.value = _announcements.value.filter { it.id != id }
-          kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-            database.notificationDao().deleteNotificationById(id)
-          }
-        } else if (title.isNotBlank()) {
-          val message = record.optString("message")
-          val author = record.optString("author", "Department of Medical Radiography")
-          val priority = record.optString("priority", "Normal")
-          val target = record.optString("target", "All Students")
-          val item = CloudAnnouncement(
-            id = id,
-            title = title,
-            message = message,
-            author = author,
-            priority = priority,
-            target = target
-          )
-          _announcements.value = listOf(item) + _announcements.value.filter { it.id != item.id }
-
-          val entity = com.example.data.local.entity.NotificationEntity(
-            id = id,
-            title = title,
-            message = message,
-            category = record.optString("category", if (priority.contains("Exam", ignoreCase = true)) "Exam Alert" else "General Announcement"),
-            priority = priority,
-            target = target,
-            author = author,
-            isPublished = true,
-            createdAt = System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis(),
-            isSyncedWithCloud = true
-          )
-          kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-            database.notificationDao().insertNotification(entity)
-          }
-
-          if (eventType == "INSERT" && prefs.getBoolean("pref_notifications_enabled", true)) {
-            com.example.util.SystemNotificationHelper.showNotification(context, title, message, priority)
-          }
-        }
-      }
-      "app_config" -> {
-        val cardStyle = record.optString("card_style")
-        if (cardStyle.isNotBlank()) {
-          _globalCardStyle.value = cardStyle
-          prefs.edit().putString("global_card_style", cardStyle).apply()
-        }
+    if (table == "announcements" || table == "notifications") {
+      val title = record.optString("title")
+      val id = record.optString("id", java.util.UUID.randomUUID().toString())
+      if (eventType == "DELETE") {
+        _announcements.value = _announcements.value.filter { it.id != id }
+      } else if (title.isNotBlank()) {
+        val message = record.optString("message")
+        val author = record.optString("author", "Department of Medical Radiography")
+        val priority = record.optString("priority", "Normal")
+        val target = record.optString("target", "All Students")
+        val createdTs = parseTimestamp(record.optString("created_at"))
+        val item = CloudAnnouncement(
+          id = id,
+          title = title,
+          message = message,
+          author = author,
+          priority = priority,
+          target = target,
+          timestamp = createdTs
+        )
+        _announcements.value = listOf(item) + _announcements.value.filter { it.id != item.id }
       }
     }
-    // Execute synchronous DB entity updates immediately
-    applyRealtimeRecordSync(table, eventType, record)
-    scope.launch {
-      handleRealtimeUpdate(table, eventType, record)
+
+    try {
+      kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+        if (table == "announcements" || table == "notifications") {
+          val title = record.optString("title")
+          val id = record.optString("id", java.util.UUID.randomUUID().toString())
+          if (eventType == "DELETE") {
+            database.notificationDao().deleteNotificationById(id)
+          } else if (title.isNotBlank()) {
+            val message = record.optString("message")
+            val author = record.optString("author", "Department of Medical Radiography")
+            val priority = record.optString("priority", "Normal")
+            val target = record.optString("target", "All Students")
+            val createdTs = parseTimestamp(record.optString("created_at"))
+            val updatedTs = parseTimestamp(record.optString("updated_at"))
+            val entity = com.example.data.local.entity.NotificationEntity(
+              id = id,
+              title = title,
+              message = message,
+              category = record.optString("category", if (priority.contains("Exam", ignoreCase = true)) "Exam Alert" else "General Announcement"),
+              priority = priority,
+              target = target,
+              author = author,
+              isPublished = true,
+              createdAt = createdTs,
+              updatedAt = updatedTs,
+              isSyncedWithCloud = true
+            )
+            database.notificationDao().insertNotification(entity)
+
+            if (eventType == "INSERT" && prefs.getBoolean("pref_notifications_enabled", true)) {
+              com.example.util.SystemNotificationHelper.showNotification(context, title, message, priority)
+            }
+          }
+        }
+
+        applyRealtimeRecordSync(table, eventType, record)
+        handleRealtimeUpdate(table, eventType, record)
+      }
+    } catch (e: Exception) {
+      Log.e(tag, "Error handling realtime event synchronously: ${e.message}")
     }
   }
 
-  private fun applyRealtimeRecordSync(table: String, eventType: String, record: JSONObject) {
+  private suspend fun applyRealtimeRecordSync(table: String, eventType: String, record: JSONObject) = withContext(Dispatchers.IO) {
     try {
       when (table) {
         "courses" -> {
           val remoteUuid = record.optString("id").takeIf { it.isNotBlank() }
           if (eventType == "DELETE") {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val localCourse = remoteUuid?.let { database.academicDao().getCourseByRemoteId(it) }
-              val id = localCourse?.id ?: parseJsonId(record, "id", 0L)
-              if (id > 0) {
-                database.academicDao().getCourseById(id)?.let { database.academicDao().deleteCourse(it) }
-              }
+            val localCourse = remoteUuid?.let { database.academicDao().getCourseByRemoteId(it) }
+            val id = localCourse?.id ?: parseJsonId(record, "id", 0L)
+            if (id > 0) {
+              database.academicDao().getCourseById(id)?.let { database.academicDao().deleteCourse(it) }
             }
           } else if (record.has("code") && record.has("title")) {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val existing = remoteUuid?.let { database.academicDao().getCourseByRemoteId(it) }
-              val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
-              val entity = CourseEntity(
-                id = id,
-                departmentId = parseJsonId(record, "department_id", 1L),
-                code = record.optString("code"),
-                title = record.optString("title"),
-                level = record.optString("level", "100 Level"),
-                semester = record.optString("semester", "First Semester"),
-                description = record.optString("description", ""),
-                remoteId = remoteUuid
-              )
-              database.academicDao().insertCourse(entity)
-            }
+            val existing = remoteUuid?.let { database.academicDao().getCourseByRemoteId(it) }
+            val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
+            val entity = CourseEntity(
+              id = id,
+              departmentId = parseJsonId(record, "department_id", 1L),
+              code = record.optString("code"),
+              title = record.optString("title"),
+              level = record.optString("level", "100 Level"),
+              semester = record.optString("semester", "First Semester"),
+              description = record.optString("description", ""),
+              remoteId = remoteUuid
+            )
+            database.academicDao().insertCourse(entity)
           }
         }
         "exams" -> {
           val remoteUuid = record.optString("id").takeIf { it.isNotBlank() }
           val courseRemoteId = record.optString("course_id").takeIf { it.isNotBlank() }
           if (eventType == "DELETE") {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val localExam = remoteUuid?.let { database.examDao().getExamByRemoteId(it) }
-              val id = localExam?.id ?: parseJsonId(record, "id", 0L)
-              if (id > 0) {
-                database.examDao().getExamById(id)?.let { database.examDao().deleteExam(it) }
-              }
+            val localExam = remoteUuid?.let { database.examDao().getExamByRemoteId(it) }
+            val id = localExam?.id ?: parseJsonId(record, "id", 0L)
+            if (id > 0) {
+              database.examDao().getExamById(id)?.let { database.examDao().deleteExam(it) }
             }
           } else if (record.has("title")) {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
-              val localCourseId = localCourse?.id ?: parseJsonId(record, "course_id", 1L)
-              val existing = remoteUuid?.let { database.examDao().getExamByRemoteId(it) }
-              val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
-              val entity = ExamEntity(
-                id = id,
-                courseId = localCourseId,
-                title = record.optString("title"),
-                description = record.optString("description", ""),
-                durationMinutes = record.optInt("duration_minutes", 30),
-                totalQuestions = record.optInt("total_questions", 15),
-                isPremium = record.optBoolean("is_premium", false),
-                isPublished = record.optBoolean("is_published", true),
-                remoteId = remoteUuid,
-                remoteCourseId = courseRemoteId
-              )
-              database.examDao().insertExam(entity)
-            }
+            val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+            val localCourseId = localCourse?.id ?: parseJsonId(record, "course_id", 1L)
+            val existing = remoteUuid?.let { database.examDao().getExamByRemoteId(it) }
+            val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
+            val entity = ExamEntity(
+              id = id,
+              courseId = localCourseId,
+              title = record.optString("title"),
+              description = record.optString("description", ""),
+              durationMinutes = record.optInt("duration_minutes", 30),
+              totalQuestions = record.optInt("total_questions", 15),
+              isPremium = record.optBoolean("is_premium", false),
+              isPublished = record.optBoolean("is_published", true),
+              remoteId = remoteUuid,
+              remoteCourseId = courseRemoteId
+            )
+            database.examDao().insertExam(entity)
           }
         }
         "questions" -> {
@@ -406,82 +427,74 @@ class CloudSyncManager(
           val examRemoteId = record.optString("exam_id").takeIf { it.isNotBlank() }
           val courseRemoteId = record.optString("course_id").takeIf { it.isNotBlank() }
           if (eventType == "DELETE") {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val localQ = remoteUuid?.let { database.questionDao().getQuestionByRemoteId(it) }
-              val id = localQ?.id ?: parseJsonId(record, "id", 0L)
-              if (id > 0) {
-                database.questionDao().getQuestionById(id)?.let { database.questionDao().deleteQuestion(it) }
-              }
+            val localQ = remoteUuid?.let { database.questionDao().getQuestionByRemoteId(it) }
+            val id = localQ?.id ?: parseJsonId(record, "id", 0L)
+            if (id > 0) {
+              database.questionDao().getQuestionById(id)?.let { database.questionDao().deleteQuestion(it) }
             }
           } else if (record.has("question_text")) {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
-              val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
-              val localCourseId = localExam?.courseId ?: localCourse?.id ?: parseJsonId(record, "course_id", 1L)
-              val existing = remoteUuid?.let { database.questionDao().getQuestionByRemoteId(it) }
-              val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
-              val entity = QuestionEntity(
-                id = id,
-                courseId = localCourseId,
-                topicId = parseJsonId(record, "topic_id", 1L),
-                questionText = if (record.isNull("question_text")) "" else record.optString("question_text", ""),
-                optionA = if (record.isNull("option_a")) "" else record.optString("option_a", ""),
-                optionB = if (record.isNull("option_b")) "" else record.optString("option_b", ""),
-                optionC = if (record.isNull("option_c")) "" else record.optString("option_c", ""),
-                optionD = if (record.isNull("option_d")) "" else record.optString("option_d", ""),
-                correctAnswer = record.optString("correct_answer", "A"),
-                explanation = record.optString("explanation", "Refer to clinical radiology modules for verified rationale."),
-                difficulty = record.optString("difficulty", "Medium"),
-                isPremium = record.optBoolean("is_premium", false),
-                isPublished = record.optBoolean("is_published", true),
-                isDemo = record.optBoolean("is_demo", false),
-                questionType = record.optString("question_type", "MULTIPLE_CHOICE"),
-                assessmentTitle = record.optString("assessment_title", "Continuous Assessment"),
-                marks = record.optInt("marks", 1),
-                timeLimitSeconds = record.optInt("time_limit_seconds", 60),
-                imageUrl = record.optString("image_url").takeIf { it.isNotBlank() },
-                remoteId = remoteUuid,
-                remoteExamId = examRemoteId,
-                remoteCourseId = courseRemoteId
-              )
-              database.questionDao().insertQuestion(entity)
-            }
+            val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
+            val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+            val localCourseId = localExam?.courseId ?: localCourse?.id ?: parseJsonId(record, "course_id", 1L)
+            val existing = remoteUuid?.let { database.questionDao().getQuestionByRemoteId(it) }
+            val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
+            val entity = QuestionEntity(
+              id = id,
+              courseId = localCourseId,
+              topicId = parseJsonId(record, "topic_id", 1L),
+              questionText = if (record.isNull("question_text")) "" else record.optString("question_text", ""),
+              optionA = if (record.isNull("option_a")) "" else record.optString("option_a", ""),
+              optionB = if (record.isNull("option_b")) "" else record.optString("option_b", ""),
+              optionC = if (record.isNull("option_c")) "" else record.optString("option_c", ""),
+              optionD = if (record.isNull("option_d")) "" else record.optString("option_d", ""),
+              correctAnswer = record.optString("correct_answer", "A"),
+              explanation = record.optString("explanation", "Refer to clinical radiology modules for verified rationale."),
+              difficulty = record.optString("difficulty", "Medium"),
+              isPremium = record.optBoolean("is_premium", false),
+              isPublished = record.optBoolean("is_published", true),
+              isDemo = record.optBoolean("is_demo", false),
+              questionType = record.optString("question_type", "MULTIPLE_CHOICE"),
+              assessmentTitle = record.optString("assessment_title", "Continuous Assessment"),
+              marks = record.optInt("marks", 1),
+              timeLimitSeconds = record.optInt("time_limit_seconds", 60),
+              imageUrl = record.optString("image_url").takeIf { it.isNotBlank() },
+              remoteId = remoteUuid,
+              remoteExamId = examRemoteId,
+              remoteCourseId = courseRemoteId
+            )
+            database.questionDao().insertQuestion(entity)
           }
         }
         "study_materials" -> {
           val remoteUuid = record.optString("id").takeIf { it.isNotBlank() }
           val courseRemoteId = record.optString("course_id").takeIf { it.isNotBlank() }
           if (eventType == "DELETE") {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val localMat = remoteUuid?.let { database.studyMaterialDao().getMaterialByRemoteId(it) }
-              val id = localMat?.id ?: parseJsonId(record, "id", 0L)
-              if (id > 0) {
-                database.studyMaterialDao().getMaterialById(id)?.let { database.studyMaterialDao().deleteMaterial(it) }
-              }
+            val localMat = remoteUuid?.let { database.studyMaterialDao().getMaterialByRemoteId(it) }
+            val id = localMat?.id ?: parseJsonId(record, "id", 0L)
+            if (id > 0) {
+              database.studyMaterialDao().getMaterialById(id)?.let { database.studyMaterialDao().deleteMaterial(it) }
             }
           } else {
             val title = record.optString("title")
             if (title.isNotBlank()) {
-              kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
-                val localCourseId = localCourse?.id ?: parseJsonId(record, "course_id", 1L)
-                val existing = remoteUuid?.let { database.studyMaterialDao().getMaterialByRemoteId(it) }
-                val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
-                val entity = StudyMaterialEntity(
-                  id = id,
-                  courseId = localCourseId,
-                  topicId = parseJsonId(record, "topic_id", 1L),
-                  title = title,
-                  description = record.optString("description", ""),
-                  contentType = record.optString("content_type", "Lecture Note"),
-                  contentBody = record.optString("content_body", ""),
-                  externalUrl = (record.optString("external_url").takeIf { it.isNotBlank() } ?: record.optString("file_url")).takeIf { it.isNotBlank() },
-                  isPremium = record.optBoolean("is_premium", false),
-                  remoteId = remoteUuid,
-                  remoteCourseId = courseRemoteId
-                )
-                database.studyMaterialDao().insertMaterial(entity)
-              }
+              val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+              val localCourseId = localCourse?.id ?: parseJsonId(record, "course_id", 1L)
+              val existing = remoteUuid?.let { database.studyMaterialDao().getMaterialByRemoteId(it) }
+              val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
+              val entity = StudyMaterialEntity(
+                id = id,
+                courseId = localCourseId,
+                topicId = parseJsonId(record, "topic_id", 1L),
+                title = title,
+                description = record.optString("description", ""),
+                contentType = record.optString("content_type", "Lecture Note"),
+                contentBody = record.optString("content_body", ""),
+                externalUrl = (record.optString("external_url").takeIf { it.isNotBlank() } ?: record.optString("file_url")).takeIf { it.isNotBlank() },
+                isPremium = record.optBoolean("is_premium", false),
+                remoteId = remoteUuid,
+                remoteCourseId = courseRemoteId
+              )
+              database.studyMaterialDao().insertMaterial(entity)
             }
           }
         }
@@ -489,36 +502,79 @@ class CloudSyncManager(
           val remoteUuid = record.optString("id").takeIf { it.isNotBlank() }
           val courseRemoteId = record.optString("course_id").takeIf { it.isNotBlank() }
           if (eventType == "DELETE") {
-            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-              val localLib = remoteUuid?.let { database.courseLibraryDao().getLibraryByRemoteId(it) }
-              val id = localLib?.id ?: parseJsonId(record, "id", 0L)
-              if (id > 0) {
-                database.courseLibraryDao().getLibraryById(id)?.let { database.courseLibraryDao().deleteLibrary(it) }
-              }
+            val localLib = remoteUuid?.let { database.courseLibraryDao().getLibraryByRemoteId(it) }
+            val id = localLib?.id ?: parseJsonId(record, "id", 0L)
+            if (id > 0) {
+              database.courseLibraryDao().getLibraryById(id)?.let { database.courseLibraryDao().deleteLibrary(it) }
             }
           } else {
             val name = record.optString("name").ifBlank { record.optString("title") }
             val url = record.optString("external_url").ifBlank { record.optString("url") }
             if (name.isNotBlank() && url.isNotBlank()) {
-              kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
-                val localCourseId = localCourse?.id ?: parseJsonId(record, "course_id", 1L)
-                val existing = remoteUuid?.let { database.courseLibraryDao().getLibraryByRemoteId(it) }
-                val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
-                val entity = CourseLibraryEntity(
-                  id = id,
-                  courseId = localCourseId,
-                  courseCode = record.optString("course_code", "RAD 101"),
-                  name = name,
-                  description = record.optString("description", ""),
-                  externalUrl = url,
-                  isPublished = record.optBoolean("is_published", true),
-                  remoteId = remoteUuid,
-                  remoteCourseId = courseRemoteId
-                )
-                database.courseLibraryDao().insertLibrary(entity)
-              }
+              val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+              val localCourseId = localCourse?.id ?: parseJsonId(record, "course_id", 1L)
+              val existing = remoteUuid?.let { database.courseLibraryDao().getLibraryByRemoteId(it) }
+              val id = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
+              val entity = CourseLibraryEntity(
+                id = id,
+                courseId = localCourseId,
+                courseCode = record.optString("course_code", "RAD 101"),
+                name = name,
+                description = record.optString("description", ""),
+                externalUrl = url,
+                isPublished = record.optBoolean("is_published", true),
+                remoteId = remoteUuid,
+                remoteCourseId = courseRemoteId
+              )
+              database.courseLibraryDao().insertLibrary(entity)
             }
+          }
+        }
+        "exam_attempts" -> {
+          val remoteUuid = record.optString("id").takeIf { it.isNotBlank() }
+          if (eventType == "DELETE") {
+            val localAttempt = remoteUuid?.let { database.examDao().getAttemptByRemoteId(it) }
+            val id = localAttempt?.id ?: parseJsonId(record, "id", 0L)
+            if (id > 0) {
+              // Deleted remote attempt
+            }
+          } else if (remoteUuid != null) {
+            val examRemoteId = record.optString("exam_id").takeIf { it.isNotBlank() }
+            val courseRemoteId = record.optString("course_id").takeIf { it.isNotBlank() }
+            val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
+            val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+            val localExamId = localExam?.id ?: parseJsonId(record, "exam_id", 0L)
+            val localCourseId = localExam?.courseId ?: localCourse?.id ?: 1L
+            val studentUuid = record.optString("student_id").ifBlank { record.optString("user_id") }
+            val localUser = if (studentUuid.isNotBlank()) database.userDao().getUserByEmail(studentUuid) else null
+            val localUserId = localUser?.id ?: FlexibleIdHelper.toPositiveLong(studentUuid, 1L)
+
+            val existing = database.examDao().getAttemptByRemoteId(remoteUuid)
+            val localId = existing?.id ?: parseJsonId(record, "id", System.currentTimeMillis())
+            val score = record.optInt("score", 0)
+            val totalQ = record.optInt("total_questions", localExam?.totalQuestions ?: 15)
+            val durationSec = record.optInt("duration_seconds", record.optInt("time_spent_seconds", 0))
+
+            database.examDao().insertAttempt(
+              ExamAttemptEntity(
+                id = localId,
+                userId = localUserId,
+                examId = localExamId,
+                courseTitle = localCourse?.title ?: "Medical Radiography",
+                examTitle = localExam?.title ?: "CBT Examination",
+                score = score,
+                totalQuestions = totalQ,
+                correctAnswers = score,
+                incorrectAnswers = maxOf(0, totalQ - score),
+                unansweredQuestions = 0,
+                timeSpentSeconds = durationSec,
+                answersJson = existing?.answersJson ?: "{}",
+                timestamp = parseTimestamp(record.optString("created_at")),
+                remoteId = remoteUuid,
+                remoteExamId = examRemoteId,
+                remoteCourseId = courseRemoteId
+              )
+            )
           }
         }
       }
@@ -527,134 +583,173 @@ class CloudSyncManager(
     }
   }
 
-  private fun handleRealtimeUpdate(table: String, eventType: String, record: JSONObject) {
-    scope.launch {
-      when (table) {
-        "announcements" -> {
-          pullAnnouncements()
+  fun applyAppConfigKeyValue(key: String, value: String) {
+    if (key.isBlank()) return
+    when (key) {
+      "global_card_style", "card_style" -> {
+        _globalCardStyle.value = value
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(theme = value)
+        prefs.edit().putString("global_card_style", value).putString("sprint_theme", value).apply()
+      }
+      "sprint_theme" -> {
+        _globalCardStyle.value = value
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(theme = value)
+        prefs.edit().putString("global_card_style", value).putString("sprint_theme", value).apply()
+      }
+      "sprint_title" -> {
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(title = value)
+        prefs.edit().putString("sprint_title", value).apply()
+      }
+      "sprint_subtitle" -> {
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(subtitle = value)
+        prefs.edit().putString("sprint_subtitle", value).apply()
+      }
+      "sprint_badge" -> {
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(badge = value)
+        prefs.edit().putString("sprint_badge", value).apply()
+      }
+      "sprint_course_id" -> {
+        val cid = value.toLongOrNull() ?: 1L
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(courseId = cid)
+        prefs.edit().putLong("sprint_course_id", cid).apply()
+      }
+      "sprint_course_code" -> {
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(courseCode = value)
+        prefs.edit().putString("sprint_course_code", value).apply()
+      }
+      "sprint_question_count" -> {
+        val count = value.toIntOrNull() ?: 15
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(questionCount = count)
+        prefs.edit().putInt("sprint_question_count", count).apply()
+      }
+      "sprint_active_students" -> {
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(activeStudentsText = value)
+        prefs.edit().putString("sprint_active_students", value).apply()
+      }
+      "sprint_question_ids" -> {
+        val ids = if (value.isNotBlank()) value.split(",").mapNotNull { it.trim().toLongOrNull() } else emptyList()
+        _dailySprintConfig.value = _dailySprintConfig.value.copy(questionIds = ids)
+        prefs.edit().putString("sprint_question_ids", value).apply()
+      }
+      "practice_card_is_active" -> {
+        val active = value.toBoolean()
+        _practiceCardConfig.value = _practiceCardConfig.value.copy(isConfigured = active)
+        prefs.edit().putBoolean("practice_card_is_active", active).apply()
+      }
+      "practice_card_course_id" -> {
+        val cid = value.toLongOrNull() ?: 1L
+        _practiceCardConfig.value = _practiceCardConfig.value.copy(courseId = cid)
+        prefs.edit().putLong("practice_card_course_id", cid).apply()
+      }
+      "practice_card_course_code" -> {
+        _practiceCardConfig.value = _practiceCardConfig.value.copy(courseCode = value)
+        prefs.edit().putString("practice_card_course_code", value).apply()
+      }
+      "practice_card_course_title" -> {
+        _practiceCardConfig.value = _practiceCardConfig.value.copy(courseTitle = value)
+        prefs.edit().putString("practice_card_course_title", value).apply()
+      }
+      "practice_card_question_count" -> {
+        val count = value.toIntOrNull() ?: 15
+        _practiceCardConfig.value = _practiceCardConfig.value.copy(questionCount = count)
+        prefs.edit().putInt("practice_card_question_count", count).apply()
+      }
+      "practice_card_question_ids" -> {
+        val ids = if (value.isNotBlank()) value.split(",").mapNotNull { it.trim().toLongOrNull() } else emptyList()
+        _practiceCardConfig.value = _practiceCardConfig.value.copy(questionIds = ids)
+        prefs.edit().putString("practice_card_question_ids", value).apply()
+      }
+      "mock_card_is_active" -> {
+        val active = value.toBoolean()
+        _mockCardConfig.value = _mockCardConfig.value.copy(isConfigured = active)
+        prefs.edit().putBoolean("mock_card_is_active", active).apply()
+      }
+      "mock_card_course_id" -> {
+        val cid = value.toLongOrNull() ?: 1L
+        _mockCardConfig.value = _mockCardConfig.value.copy(courseId = cid)
+        prefs.edit().putLong("mock_card_course_id", cid).apply()
+      }
+      "mock_card_course_code" -> {
+        _mockCardConfig.value = _mockCardConfig.value.copy(courseCode = value)
+        prefs.edit().putString("mock_card_course_code", value).apply()
+      }
+      "mock_card_course_title" -> {
+        _mockCardConfig.value = _mockCardConfig.value.copy(courseTitle = value)
+        prefs.edit().putString("mock_card_course_title", value).apply()
+      }
+      "mock_card_exam_id" -> {
+        val eid = value.toLongOrNull() ?: 0L
+        _mockCardConfig.value = _mockCardConfig.value.copy(examId = eid)
+        prefs.edit().putLong("mock_card_exam_id", eid).apply()
+      }
+      "mock_card_exam_title" -> {
+        _mockCardConfig.value = _mockCardConfig.value.copy(examTitle = value)
+        prefs.edit().putString("mock_card_exam_title", value).apply()
+      }
+      "mock_card_question_count" -> {
+        val count = value.toIntOrNull() ?: 15
+        _mockCardConfig.value = _mockCardConfig.value.copy(questionCount = count)
+        prefs.edit().putInt("mock_card_question_count", count).apply()
+      }
+      "mock_card_duration_minutes" -> {
+        val dur = value.toIntOrNull() ?: 30
+        _mockCardConfig.value = _mockCardConfig.value.copy(durationMinutes = dur)
+        prefs.edit().putInt("mock_card_duration_minutes", dur).apply()
+      }
+      "mock_card_question_ids" -> {
+        val ids = if (value.isNotBlank()) value.split(",").mapNotNull { it.trim().toLongOrNull() } else emptyList()
+        _mockCardConfig.value = _mockCardConfig.value.copy(questionIds = ids)
+        prefs.edit().putString("mock_card_question_ids", value).apply()
+      }
+      "about_description" -> {
+        _aboutAppContent.value = _aboutAppContent.value.copy(description = value)
+        prefs.edit().putString("about_desc", value).apply()
+      }
+      "version_notes" -> {
+        _aboutAppContent.value = _aboutAppContent.value.copy(versionNotes = value)
+        prefs.edit().putString("about_version_notes", value).apply()
+      }
+      "department_contact" -> {
+        _aboutAppContent.value = _aboutAppContent.value.copy(departmentContact = value)
+        prefs.edit().putString("about_contact", value).apply()
+      }
+      "credits" -> {
+        _aboutAppContent.value = _aboutAppContent.value.copy(credits = value)
+        prefs.edit().putString("about_credits", value).apply()
+      }
+      "has_update_notice" -> {
+        val hasNotice = value.toBoolean()
+        _aboutAppContent.value = _aboutAppContent.value.copy(hasUpdateNotice = hasNotice)
+        prefs.edit().putBoolean("has_update_notice", hasNotice).apply()
+      }
+      "update_notes" -> {
+        _aboutAppContent.value = _aboutAppContent.value.copy(updateNotes = value)
+        prefs.edit().putString("update_notes", value).apply()
+      }
+    }
+  }
+
+  private suspend fun handleRealtimeUpdate(table: String, eventType: String, record: JSONObject) = withContext(Dispatchers.IO) {
+    when (table) {
+      "announcements" -> {
+        pullAnnouncements()
+      }
+      "exam_attempts" -> {
+        pullExamAttempts()
+      }
+      "app_config" -> {
+        if (record.has("key") && record.has("value")) {
+          applyAppConfigKeyValue(record.optString("key"), record.optString("value"))
+        } else {
+          val keys = record.keys()
+          while (keys.hasNext()) {
+            val k = keys.next()
+            applyAppConfigKeyValue(k, record.optString(k))
+          }
         }
-        "app_config" -> {
-          val cardStyle = record.optString("card_style")
-          if (cardStyle.isNotBlank()) {
-            _globalCardStyle.value = cardStyle
-            prefs.edit().putString("global_card_style", cardStyle).apply()
-          }
-          val desc = record.optString("about_description")
-          if (desc.isNotBlank()) {
-            val updated = _aboutAppContent.value.copy(
-              description = desc,
-              versionNotes = record.optString("version_notes", _aboutAppContent.value.versionNotes),
-              departmentContact = record.optString("department_contact", _aboutAppContent.value.departmentContact),
-              credits = record.optString("credits", _aboutAppContent.value.credits),
-              hasUpdateNotice = record.optBoolean("has_update_notice", false),
-              updateNotes = record.optString("update_notes", "")
-            )
-            _aboutAppContent.value = updated
-          }
-
-          // Handle Realtime Daily CBT Sprint changes & Global Theme Sync
-          val sprintTitle = record.optString("sprint_title")
-          val sprintSubtitle = record.optString("sprint_subtitle")
-          val sprintBadge = record.optString("sprint_badge")
-          val sprintTheme = record.optString("sprint_theme")
-          val effectiveTheme = if (sprintTheme.isNotBlank()) sprintTheme else cardStyle
-          if (effectiveTheme.isNotBlank()) {
-            _globalCardStyle.value = effectiveTheme
-            _dailySprintConfig.value = _dailySprintConfig.value.copy(theme = effectiveTheme)
-            prefs.edit()
-              .putString("global_card_style", effectiveTheme)
-              .putString("sprint_theme", effectiveTheme)
-              .apply()
-          }
-
-          val sprintQIds = if (record.has("sprint_question_ids")) {
-            record.optString("sprint_question_ids", "").split(",").mapNotNull { it.trim().toLongOrNull() }
-          } else _dailySprintConfig.value.questionIds
-
-          if (sprintTitle.isNotBlank() || sprintBadge.isNotBlank() || sprintSubtitle.isNotBlank() || record.has("sprint_course_id") || record.has("sprint_question_ids")) {
-            val newSprint = _dailySprintConfig.value.copy(
-              badge = if (sprintBadge.isNotBlank()) sprintBadge else _dailySprintConfig.value.badge,
-              title = if (sprintTitle.isNotBlank()) sprintTitle else _dailySprintConfig.value.title,
-              subtitle = if (sprintSubtitle.isNotBlank()) sprintSubtitle else _dailySprintConfig.value.subtitle,
-              courseId = if (record.has("sprint_course_id")) parseJsonId(record, "sprint_course_id", 1L) else _dailySprintConfig.value.courseId,
-              courseCode = if (record.has("sprint_course_code")) record.optString("sprint_course_code", "RAD 101") else _dailySprintConfig.value.courseCode,
-              questionCount = if (record.has("sprint_question_count")) record.optInt("sprint_question_count", 15) else _dailySprintConfig.value.questionCount,
-              activeStudentsText = if (record.has("sprint_active_students")) record.optString("sprint_active_students", _dailySprintConfig.value.activeStudentsText) else _dailySprintConfig.value.activeStudentsText,
-              theme = if (effectiveTheme.isNotBlank()) effectiveTheme else _dailySprintConfig.value.theme,
-              questionIds = sprintQIds
-            )
-            _dailySprintConfig.value = newSprint
-            prefs.edit()
-              .putString("sprint_badge", newSprint.badge)
-              .putString("sprint_title", newSprint.title)
-              .putString("sprint_subtitle", newSprint.subtitle)
-              .putLong("sprint_course_id", newSprint.courseId)
-              .putString("sprint_course_code", newSprint.courseCode)
-              .putInt("sprint_question_count", newSprint.questionCount)
-              .putString("sprint_active_students", newSprint.activeStudentsText)
-              .putString("sprint_theme", newSprint.theme)
-              .putString("sprint_question_ids", newSprint.questionIds.joinToString(","))
-              .apply()
-            Log.i(tag, "Realtime Daily CBT Sprint updated: ${newSprint.title} with theme ${newSprint.theme}")
-          }
-
-          if (record.has("practice_card_course_id") || record.has("practice_card_is_active") || record.has("practice_card_question_ids")) {
-            val practiceQIds = if (record.has("practice_card_question_ids")) {
-              record.optString("practice_card_question_ids", "").split(",").mapNotNull { it.trim().toLongOrNull() }
-            } else _practiceCardConfig.value.questionIds
-
-            val newPractice = _practiceCardConfig.value.copy(
-              isConfigured = record.optBoolean("practice_card_is_active", _practiceCardConfig.value.isConfigured),
-              courseId = parseJsonId(record, "practice_card_course_id", _practiceCardConfig.value.courseId),
-              courseCode = record.optString("practice_card_course_code", _practiceCardConfig.value.courseCode),
-              courseTitle = record.optString("practice_card_course_title", _practiceCardConfig.value.courseTitle),
-              questionCount = record.optInt("practice_card_question_count", _practiceCardConfig.value.questionCount),
-              questionIds = practiceQIds
-            )
-            _practiceCardConfig.value = newPractice
-            prefs.edit()
-              .putBoolean("practice_card_is_active", newPractice.isConfigured)
-              .putLong("practice_card_course_id", newPractice.courseId)
-              .putString("practice_card_course_code", newPractice.courseCode)
-              .putString("practice_card_course_title", newPractice.courseTitle)
-              .putInt("practice_card_question_count", newPractice.questionCount)
-              .putString("practice_card_question_ids", newPractice.questionIds.joinToString(","))
-              .apply()
-          }
-
-          if (record.has("mock_card_course_id") || record.has("mock_card_is_active") || record.has("mock_card_question_ids")) {
-            val mockQIds = if (record.has("mock_card_question_ids")) {
-              record.optString("mock_card_question_ids", "").split(",").mapNotNull { it.trim().toLongOrNull() }
-            } else _mockCardConfig.value.questionIds
-
-            val newMock = _mockCardConfig.value.copy(
-              isConfigured = record.optBoolean("mock_card_is_active", _mockCardConfig.value.isConfigured),
-              courseId = parseJsonId(record, "mock_card_course_id", _mockCardConfig.value.courseId),
-              courseCode = record.optString("mock_card_course_code", _mockCardConfig.value.courseCode),
-              courseTitle = record.optString("mock_card_course_title", _mockCardConfig.value.courseTitle),
-              examId = parseJsonId(record, "mock_card_exam_id", _mockCardConfig.value.examId),
-              examTitle = record.optString("mock_card_exam_title", _mockCardConfig.value.examTitle),
-              questionCount = record.optInt("mock_card_question_count", _mockCardConfig.value.questionCount),
-              durationMinutes = record.optInt("mock_card_duration_minutes", _mockCardConfig.value.durationMinutes),
-              questionIds = mockQIds
-            )
-            _mockCardConfig.value = newMock
-            prefs.edit()
-              .putBoolean("mock_card_is_active", newMock.isConfigured)
-              .putLong("mock_card_course_id", newMock.courseId)
-              .putString("mock_card_course_code", newMock.courseCode)
-              .putString("mock_card_course_title", newMock.courseTitle)
-              .putLong("mock_card_exam_id", newMock.examId)
-              .putString("mock_card_exam_title", newMock.examTitle)
-              .putInt("mock_card_question_count", newMock.questionCount)
-              .putInt("mock_card_duration_minutes", newMock.durationMinutes)
-              .putString("mock_card_question_ids", newMock.questionIds.joinToString(","))
-              .apply()
-          }
-        }
-        "student_feedback" -> {
-          pullStudentFeedback()
-        }
+      }
+      "student_feedback" -> {
+        pullStudentFeedback()
       }
     }
   }
@@ -671,35 +766,7 @@ class CloudSyncManager(
             val key = record.optString("key")
             val value = record.optString("value")
             if (key.isNotBlank()) {
-              when (key) {
-                "global_card_style", "card_style" -> {
-                  _globalCardStyle.value = value
-                  prefs.edit().putString("global_card_style", value).apply()
-                }
-                "about_description" -> {
-                  _aboutAppContent.value = _aboutAppContent.value.copy(description = value)
-                  prefs.edit().putString("about_desc", value).apply()
-                }
-                "sprint_title" -> {
-                  _dailySprintConfig.value = _dailySprintConfig.value.copy(title = value)
-                  prefs.edit().putString("sprint_title", value).apply()
-                }
-                "sprint_subtitle" -> {
-                  _dailySprintConfig.value = _dailySprintConfig.value.copy(subtitle = value)
-                  prefs.edit().putString("sprint_subtitle", value).apply()
-                }
-                "sprint_badge" -> {
-                  _dailySprintConfig.value = _dailySprintConfig.value.copy(badge = value)
-                  prefs.edit().putString("sprint_badge", value).apply()
-                }
-                "sprint_theme" -> {
-                  _globalCardStyle.value = value
-                  _dailySprintConfig.value = _dailySprintConfig.value.copy(theme = value)
-                  prefs.edit().putString("global_card_style", value).putString("sprint_theme", value).apply()
-                }
-              }
-            } else {
-              handleRealtimeUpdate("app_config", "UPDATE", record)
+              applyAppConfigKeyValue(key, value)
             }
           }
           true
@@ -722,6 +789,7 @@ class CloudSyncManager(
         val adapter = supabaseClient.moshi.adapter<List<SupabaseAnnouncement>>(type)
         val list = adapter.fromJson(json) ?: emptyList()
         val mapped = list.map {
+          val createdTs = parseTimestamp(it.createdAt)
           CloudAnnouncement(
             id = it.id,
             title = it.title ?: "Notice",
@@ -729,12 +797,14 @@ class CloudSyncManager(
             author = it.author ?: "Department of Medical Radiography",
             priority = it.priority,
             target = it.target ?: "All Students",
-            timestamp = System.currentTimeMillis()
+            timestamp = createdTs
           )
         }
         _announcements.value = mapped
 
         val entities = list.map {
+          val createdTs = parseTimestamp(it.createdAt)
+          val updatedTs = parseTimestamp(it.updatedAt)
           com.example.data.local.entity.NotificationEntity(
             id = it.id,
             title = it.title ?: "Notice",
@@ -744,8 +814,8 @@ class CloudSyncManager(
             target = it.target ?: "All Students",
             author = it.author ?: "Department of Medical Radiography",
             isPublished = it.isPublished,
-            createdAt = System.currentTimeMillis(),
-            updatedAt = System.currentTimeMillis(),
+            createdAt = createdTs,
+            updatedAt = updatedTs,
             isSyncedWithCloud = true
           )
         }
@@ -780,6 +850,114 @@ class CloudSyncManager(
       } catch (e: Exception) {
         Log.e(tag, "Failed to parse feedback: ${e.message}")
       }
+    }
+  }
+
+  suspend fun pullProfiles(): Boolean = withContext(Dispatchers.IO) {
+    if (!isNetworkAvailable()) return@withContext false
+    try {
+      val res = supabaseClient.restGet("profiles?select=*&order=created_at.desc")
+      if (res.isFailure) {
+        Log.e(tag, "pullProfiles failed: ${res.exceptionOrNull()?.message}")
+        return@withContext false
+      }
+      val json = res.getOrNull() ?: "[]"
+      val type = Types.newParameterizedType(List::class.java, SupabaseProfile::class.java)
+      val list = supabaseClient.moshi.adapter<List<SupabaseProfile>>(type).fromJson(json) ?: emptyList()
+      for (p in list) {
+        val email = p.email?.trim()?.lowercase() ?: continue
+        val resolvedRole = if (p.appRole?.equals("admin", ignoreCase = true) == true || email == "admin@medrad.edu.ng") "ADMIN" else "STUDENT"
+        val existing = database.userDao().getUserByEmail(email)
+        if (existing != null) {
+          val updated = existing.copy(
+            fullName = p.fullName?.ifBlank { existing.fullName } ?: existing.fullName,
+            role = resolvedRole,
+            department = p.department ?: existing.department,
+            faculty = p.faculty ?: existing.faculty,
+            level = p.level ?: existing.level,
+            isActive = p.isActive,
+            isPremium = if (resolvedRole == "ADMIN") true else existing.isPremium
+          )
+          database.userDao().updateUser(updated)
+        } else {
+          val newUser = UserEntity(
+            fullName = p.fullName ?: "Student",
+            email = email,
+            phoneNumber = "",
+            passwordHash = "",
+            role = resolvedRole,
+            adminRole = if (email == "admin@medrad.edu.ng") "PRIMARY" else "SECONDARY",
+            permissions = if (resolvedRole == "ADMIN") "ALL" else "",
+            isActive = p.isActive,
+            university = "University of Maiduguri",
+            faculty = p.faculty ?: "College of Medical Sciences",
+            department = p.department ?: "Medical Radiography",
+            level = p.level ?: "100 Level",
+            semester = "Full Session",
+            isPremium = resolvedRole == "ADMIN"
+          )
+          database.userDao().insertUser(newUser)
+        }
+      }
+      true
+    } catch (e: Exception) {
+      Log.e(tag, "Error parsing profiles: ${e.message}")
+      false
+    }
+  }
+
+  suspend fun pullExamAttempts(): Boolean = withContext(Dispatchers.IO) {
+    if (!isNetworkAvailable()) return@withContext false
+    try {
+      val res = supabaseClient.restGet("exam_attempts?select=*&order=created_at.desc&limit=100")
+      if (res.isFailure) {
+        Log.e(tag, "pullExamAttempts failed: ${res.exceptionOrNull()?.message}")
+        return@withContext false
+      }
+      val json = res.getOrNull() ?: "[]"
+      val array = JSONArray(json)
+      for (i in 0 until array.length()) {
+        val record = array.getJSONObject(i)
+        val remoteUuid = record.optString("id").takeIf { it.isNotBlank() } ?: continue
+        val examRemoteId = record.optString("exam_id").takeIf { it.isNotBlank() }
+        val courseRemoteId = record.optString("course_id").takeIf { it.isNotBlank() }
+        val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
+        val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+        val localExamId = localExam?.id ?: parseJsonId(record, "exam_id", 0L)
+        val studentUuid = record.optString("student_id").ifBlank { record.optString("user_id") }
+        val localUser = if (studentUuid.isNotBlank()) database.userDao().getUserByEmail(studentUuid) else null
+        val localUserId = localUser?.id ?: FlexibleIdHelper.toPositiveLong(studentUuid, 1L)
+
+        val existing = database.examDao().getAttemptByRemoteId(remoteUuid)
+        val localId = existing?.id ?: parseJsonId(record, "id", 0L).let { if (it > 0) it else 0L }
+        val score = record.optInt("score", 0)
+        val totalQ = record.optInt("total_questions", localExam?.totalQuestions ?: 15)
+        val durationSec = record.optInt("duration_seconds", record.optInt("time_spent_seconds", 0))
+
+        val attemptEntity = ExamAttemptEntity(
+          id = if (localId > 0) localId else 0L,
+          userId = localUserId,
+          examId = if (localExamId > 0) localExamId else null,
+          courseTitle = localCourse?.title ?: "Medical Radiography",
+          examTitle = localExam?.title ?: "CBT Examination",
+          score = score,
+          totalQuestions = totalQ,
+          correctAnswers = score,
+          incorrectAnswers = maxOf(0, totalQ - score),
+          unansweredQuestions = 0,
+          timeSpentSeconds = durationSec,
+          answersJson = existing?.answersJson ?: "{}",
+          timestamp = parseTimestamp(record.optString("created_at")),
+          remoteId = remoteUuid,
+          remoteExamId = examRemoteId,
+          remoteCourseId = courseRemoteId
+        )
+        database.examDao().insertAttempt(attemptEntity)
+      }
+      true
+    } catch (e: Exception) {
+      Log.e(tag, "Error parsing exam attempts: ${e.message}")
+      false
     }
   }
 
@@ -1141,6 +1319,12 @@ class CloudSyncManager(
 
       // 8. Student Feedback
       pullStudentFeedback()
+
+      // 9. User Profiles (Authoritative real users from Supabase)
+      pullProfiles()
+
+      // 10. Exam Attempts (Student examination history and scores)
+      pullExamAttempts()
 
       val cCount = database.academicDao().getCoursesList().size
       val mCount = database.studyMaterialDao().getAllMaterialsList().size

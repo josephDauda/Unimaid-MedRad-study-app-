@@ -153,14 +153,17 @@ data class SupabaseQuestion(
 data class SupabaseExamAttempt(
   val id: String? = null,
   @Json(name = "user_id") val userId: String? = null,
+  @Json(name = "student_id") val studentId: String? = null,
   @Json(name = "exam_id") val examId: Any? = null,
   @Json(name = "course_id") val courseId: Any? = null,
-  val score: Int,
+  val score: Int? = 0,
   @Json(name = "total_questions") val totalQuestions: Int? = null,
   @Json(name = "time_spent_seconds") val timeSpentSeconds: Int? = null,
+  @Json(name = "duration_seconds") val durationSeconds: Int? = null,
   @Json(name = "is_passed") val isPassed: Boolean? = null,
   val passed: Boolean? = null,
   val percentage: Double? = null,
+  val status: String? = null,
   @Json(name = "created_at") val createdAt: String? = null
 )
 

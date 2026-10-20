@@ -719,7 +719,16 @@ class AdminViewModel(
 
   fun loadStats() {
     viewModelScope.launch {
+      cloudSyncManager?.pullProfiles()
       _stats.value = adminRepository.getDashboardStats()
+    }
+  }
+
+  fun syncProfilesFromCloud(onDone: () -> Unit = {}) {
+    viewModelScope.launch {
+      cloudSyncManager?.pullProfiles()
+      _stats.value = adminRepository.getDashboardStats()
+      onDone()
     }
   }
 

@@ -176,6 +176,7 @@ fun LoginScreen(
   var passwordVisible by remember { mutableStateOf(false) }
   var showResetDialog by remember { mutableStateOf(false) }
   var showEmailPasswordFields by remember { mutableStateOf(false) }
+  var showGoogleDialog by remember { mutableStateOf(false) }
 
   // Inline Validation States
   var emailError by remember { mutableStateOf<String?>(null) }
@@ -425,6 +426,49 @@ fun LoginScreen(
               )
             }
           }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
+            Text(
+              text = "  OR  ",
+              style = MaterialTheme.typography.labelSmall,
+              color = TextMuted
+            )
+            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          OutlinedButton(
+            onClick = { showGoogleDialog = true },
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(52.dp)
+              .testTag("google_signin_button"),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+              containerColor = MaterialTheme.colorScheme.surface
+            ),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.Center
+            ) {
+              GoogleEmblem(size = 20.dp)
+              Spacer(modifier = Modifier.width(10.dp))
+              Text(
+                text = "Continue with Google",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurface
+              )
+            }
+          }
         }
       }
 
@@ -455,6 +499,102 @@ fun LoginScreen(
 
       Spacer(modifier = Modifier.height(16.dp))
     }
+  }
+
+  // Google Sign-In Selection Dialog
+  if (showGoogleDialog) {
+    var googleEmailInput by remember { mutableStateOf("") }
+    var googleNameInput by remember { mutableStateOf("") }
+    var dialogError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+      onDismissRequest = { showGoogleDialog = false },
+      title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          GoogleEmblem(size = 24.dp)
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            "Continue with Google",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+          )
+        }
+      },
+      text = {
+        Column {
+          Text(
+            text = "Authenticate securely with your Google / Gmail account through Supabase Auth:",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+          Spacer(modifier = Modifier.height(12.dp))
+
+          Button(
+            onClick = {
+              showGoogleDialog = false
+              authViewModel.startGoogleOAuth(context)
+            },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(10.dp)
+          ) {
+            Text("Open Google OAuth in Browser")
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
+            Text("  OR DIRECT GMAIL  ", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
+          }
+          Spacer(modifier = Modifier.height(12.dp))
+
+          OutlinedTextField(
+            value = googleEmailInput,
+            onValueChange = { googleEmailInput = it; dialogError = null },
+            label = { Text("Gmail Address") },
+            placeholder = { Text("e.g. yourname@gmail.com") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp)
+          )
+          Spacer(modifier = Modifier.height(8.dp))
+          OutlinedTextField(
+            value = googleNameInput,
+            onValueChange = { googleNameInput = it },
+            label = { Text("Your Full Name (Optional)") },
+            placeholder = { Text("e.g. Joseph Dauda") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp)
+          )
+          if (dialogError != null) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(dialogError!!, color = ErrorRed, style = MaterialTheme.typography.labelSmall)
+          }
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            if (googleEmailInput.isBlank() || !googleEmailInput.contains("@")) {
+              dialogError = "Please enter a valid Gmail address"
+            } else {
+              showGoogleDialog = false
+              authViewModel.loginWithGoogle(
+                email = googleEmailInput.trim(),
+                fullName = googleNameInput.trim().ifBlank { "Radiography Scholar" }
+              )
+            }
+          }
+        ) {
+          Text("Sign In")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showGoogleDialog = false }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 
   // Password Reset Dialog
