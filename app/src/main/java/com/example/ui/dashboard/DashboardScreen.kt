@@ -95,6 +95,7 @@ fun DashboardScreen(
   onNavigateToSubscription: () -> Unit,
   onNavigateToResults: (attemptId: Long) -> Unit,
   onNavigateToCourses: () -> Unit,
+  onNavigateToNotifications: () -> Unit = {},
   onStartPracticeAdvanced: (courseId: Long, questionCount: Int, customTitle: String?, customCode: String?, questionIds: List<Long>) -> Unit = { id, _, _, _, _ -> onStartPractice(id) }
 ) {
   LaunchedEffect(user.id) {
@@ -701,7 +702,9 @@ fun DashboardScreen(
         Spacer(modifier = Modifier.height(14.dp))
         val latestAnn = announcements.first()
         Card(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onNavigateToNotifications() },
           shape = RoundedCornerShape(18.dp),
           colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
           border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

@@ -259,8 +259,43 @@ fun CbtScreen(
           CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         }
       } else if (sessionState.questions.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-          Text("No questions currently available for this module.", style = MaterialTheme.typography.bodyMedium)
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+          contentAlignment = Alignment.Center
+        ) {
+          Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.HelpOutline,
+              contentDescription = null,
+              modifier = Modifier.size(56.dp),
+              tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+              text = "Question Bank Empty",
+              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = "No published questions are currently assigned to ${sessionState.courseTitle.ifBlank { "this course" }}. Questions created by administrators will appear here.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(
+              onClick = onNavigateBack,
+              shape = RoundedCornerShape(10.dp)
+            ) {
+              Text("Return to Dashboard")
+            }
+          }
         }
       } else {
         val currentQuestion = sessionState.questions.getOrNull(sessionState.currentIndex)

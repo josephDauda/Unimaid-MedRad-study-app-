@@ -98,6 +98,8 @@ import com.example.ui.courses.CoursesScreen
 import com.example.ui.dashboard.DashboardScreen
 import com.example.ui.materials.StudyMaterialsScreen
 import com.example.ui.progress.ProgressScreen
+import com.example.ui.notifications.NotificationsScreen
+import androidx.compose.material.icons.filled.Notifications
 import com.example.ui.results.ResultsScreen
 import com.example.ui.subscription.SubscriptionScreen
 import com.example.ui.theme.BorderSubtle
@@ -126,7 +128,8 @@ enum class ScreenRoute {
   CBT_SESSION,
   RESULTS,
   ABOUT,
-  TERMS
+  TERMS,
+  NOTIFICATIONS
 }
 
 @Composable
@@ -139,7 +142,8 @@ fun MedradNavHost(
       container.cbtRepository,
       container.academicRepository,
       container.subscriptionRepository,
-      container.cloudSyncManager
+      container.cloudSyncManager,
+      container.notificationRepository
     )
   }
   val cbtViewModel = remember { CbtViewModel(container.cbtRepository, container.academicRepository) }
@@ -312,6 +316,7 @@ fun MedradNavHost(
           MainAuthenticatedScaffold(
             user = user,
             userProfilePreferences = container.userProfilePreferences,
+            notificationRepository = container.notificationRepository,
             currentRoute = activeRoute,
             onNavigate = { route -> navigateTo(route) },
             onLogout = {
@@ -342,7 +347,8 @@ fun MedradNavHost(
                     currentAttemptId = attemptId
                     navigateTo(ScreenRoute.RESULTS)
                   },
-                  onNavigateToCourses = { navigateTo(ScreenRoute.COURSES) }
+                  onNavigateToCourses = { navigateTo(ScreenRoute.COURSES) },
+                  onNavigateToNotifications = { navigateTo(ScreenRoute.NOTIFICATIONS) }
                 )
                 ScreenRoute.COURSES -> CoursesScreen(
                   user = user,
@@ -383,6 +389,14 @@ fun MedradNavHost(
                   subscriptionViewModel = subscriptionViewModel,
                   onNavigateBack = { popBackStack() }
                 )
+                ScreenRoute.NOTIFICATIONS -> NotificationsScreen(
+                  user = user,
+                  notificationRepository = container.notificationRepository,
+                  onNavigateBack = { popBackStack() },
+                  onNavigateToCbt = {
+                    navigateTo(ScreenRoute.DASHBOARD)
+                  }
+                )
                 else -> {}
               }
             }
@@ -398,12 +412,14 @@ fun MedradNavHost(
 fun MainAuthenticatedScaffold(
   user: UserEntity,
   userProfilePreferences: com.example.data.repository.UserProfilePreferences,
+  notificationRepository: com.example.data.repository.NotificationRepository? = null,
   currentRoute: ScreenRoute,
   onNavigate: (ScreenRoute) -> Unit,
   onLogout: () -> Unit,
   content: @Composable () -> Unit
 ) {
   val profilePhotoUri by userProfilePreferences.profilePhotoUri.collectAsState()
+  val unreadNotifications by (notificationRepository?.getUnreadCountFlow(user) ?: kotlinx.coroutines.flow.flowOf(0)).collectAsState(initial = 0)
 
   BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
     val isTablet = maxWidth >= 600.dp
@@ -466,6 +482,24 @@ fun MainAuthenticatedScaffold(
             onClick = { onNavigate(ScreenRoute.SUBSCRIPTION) },
             icon = { Icon(Icons.Default.WorkspacePremium, contentDescription = "Premium") },
             label = { Text("Premium", fontSize = 10.sp) },
+            colors = railItemColors()
+          )
+          NavigationRailItem(
+            selected = currentRoute == ScreenRoute.NOTIFICATIONS,
+            onClick = { onNavigate(ScreenRoute.NOTIFICATIONS) },
+            icon = {
+              Box(contentAlignment = Alignment.TopEnd) {
+                Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                if (unreadNotifications > 0) {
+                  Box(
+                    modifier = Modifier
+                      .size(8.dp)
+                      .background(Color(0xFFEF4444), CircleShape)
+                  )
+                }
+              }
+            },
+            label = { Text("Notices", fontSize = 10.sp) },
             colors = railItemColors()
           )
           if (user.role == "ADMIN") {
@@ -581,6 +615,26 @@ fun MainAuthenticatedScaffold(
                       contentDescription = "Admin Portal",
                       tint = WarningAmber
                     )
+                  }
+                }
+
+                IconButton(
+                  onClick = { onNavigate(ScreenRoute.NOTIFICATIONS) },
+                  modifier = Modifier.testTag("topbar_notifications_button")
+                ) {
+                  Box(contentAlignment = Alignment.TopEnd) {
+                    Icon(
+                      Icons.Default.Notifications,
+                      contentDescription = "Notifications",
+                      tint = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (unreadNotifications > 0) {
+                      Box(
+                        modifier = Modifier
+                          .size(8.dp)
+                          .background(Color(0xFFEF4444), CircleShape)
+                      )
+                    }
                   }
                 }
 

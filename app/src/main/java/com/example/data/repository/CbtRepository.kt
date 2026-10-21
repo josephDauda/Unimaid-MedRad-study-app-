@@ -85,17 +85,32 @@ class CbtRepository(
 
   suspend fun getPracticeQuestions(courseId: Long, limit: Int = 15): List<QuestionEntity> {
     return withContext(Dispatchers.IO) {
-      val questions = questionDao.getPublishedQuestionsForCourseList(courseId).ifEmpty {
-        questionDao.getAllQuestionsList().filter { it.isPublished }
-      }
+      val questions = questionDao.getPublishedQuestionsForCourseList(courseId)
       questions.shuffled().take(limit)
     }
   }
 
-  suspend fun getExamQuestions(courseId: Long, totalQuestions: Int): List<QuestionEntity> {
+  suspend fun getExamQuestions(
+    courseId: Long,
+    totalQuestions: Int,
+    examRemoteId: String? = null,
+    allowDepartmentalFallback: Boolean = false
+  ): List<QuestionEntity> {
     return withContext(Dispatchers.IO) {
-      val questions = questionDao.getPublishedQuestionsForCourseList(courseId).ifEmpty {
+      val specificExamQuestions = if (!examRemoteId.isNullOrBlank()) {
+        questionDao.getQuestionsByRemoteExamId(examRemoteId).filter { it.isPublished }
+      } else emptyList()
+
+      val courseQuestions = questionDao.getPublishedQuestionsForCourseList(courseId)
+      val questions = if (specificExamQuestions.isNotEmpty()) {
+        specificExamQuestions
+      } else if (courseQuestions.isNotEmpty()) {
+        courseQuestions
+      } else if (allowDepartmentalFallback || courseId == 9999L) {
+        // Departmental fallback pool for authorized general assessments
         questionDao.getAllQuestionsList().filter { it.isPublished }
+      } else {
+        emptyList()
       }
       questions.shuffled().take(totalQuestions)
     }

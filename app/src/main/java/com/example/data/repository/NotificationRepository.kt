@@ -389,45 +389,42 @@ class NotificationRepository(
       // 1. Save to Room immediately so no content is ever lost
       dao.insertNotification(localEntity)
 
-      // 2. Push to Supabase announcements table
-      // Try full schema first
-      val fullPayload = JSONObject().apply {
+      // 2. Push to Supabase announcements table using verified schema columns
+      val annPayload = JSONObject().apply {
         put("id", uuid)
         put("title", trimmedTitle)
         put("message", trimmedMessage)
         put("priority", priority)
         put("author", author)
         put("target", target)
-        put("category", category)
-        put("sender_id", senderId ?: "admin")
         put("is_published", true)
+        if (!senderId.isNullOrBlank() && senderId.length == 36 && senderId.count { it == '-' } == 4) {
+          put("created_by", senderId)
+        }
       }
 
       var remoteSuccess = false
       var failureReason: String? = null
 
-      val primaryRes = supabaseClient.restPost("announcements", fullPayload.toString(), upsert = true)
+      val primaryRes = supabaseClient.restPost("announcements", annPayload.toString(), upsert = true)
       if (primaryRes.isSuccess) {
         remoteSuccess = true
       } else {
         val err = primaryRes.exceptionOrNull()?.message ?: ""
-        // If rejected due to missing columns in table, fallback to core columns
-        if (err.contains("PGRST204") || err.contains("Could not find the") || err.contains("does not exist")) {
-          val corePayload = JSONObject().apply {
-            put("id", uuid)
-            put("title", trimmedTitle)
-            put("message", "[$category • Target: $target]\n\n$trimmedMessage")
-            put("priority", priority)
-            put("is_published", true)
-          }
-          val fallbackRes = supabaseClient.restPost("announcements", corePayload.toString(), upsert = true)
-          if (fallbackRes.isSuccess) {
-            remoteSuccess = true
-          } else {
-            failureReason = fallbackRes.exceptionOrNull()?.message
-          }
+        failureReason = err
+        // Fallback with minimal columns if constraint or column mismatch occurred
+        val minimalPayload = JSONObject().apply {
+          put("id", uuid)
+          put("title", trimmedTitle)
+          put("message", trimmedMessage)
+          put("priority", priority)
+          put("is_published", true)
+        }
+        val fallbackRes = supabaseClient.restPost("announcements", minimalPayload.toString(), upsert = true)
+        if (fallbackRes.isSuccess) {
+          remoteSuccess = true
         } else {
-          failureReason = err
+          failureReason = fallbackRes.exceptionOrNull()?.message ?: err
         }
       }
 
@@ -447,7 +444,7 @@ class NotificationRepository(
         dao.updateNotification(synced)
 
         // Realtime broadcast to connected clients
-        realtimeManager?.dispatchRealtimeEvent("announcements", "INSERT", fullPayload)
+        realtimeManager?.dispatchRealtimeEvent("announcements", "INSERT", annPayload)
 
         // Trigger local notification sound/banner if notifications enabled
         if (userProfilePreferences.notificationsEnabled.value) {

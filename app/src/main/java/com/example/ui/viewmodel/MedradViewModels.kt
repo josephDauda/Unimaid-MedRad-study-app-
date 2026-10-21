@@ -323,7 +323,7 @@ class CbtViewModel(
     viewModelScope.launch {
       _sessionState.value = CbtSessionState(isLoading = true)
       val durationSecs = exam.durationMinutes * 60
-      val questions = cbtRepository.getExamQuestions(exam.courseId, exam.totalQuestions)
+      val questions = cbtRepository.getExamQuestions(exam.courseId, exam.totalQuestions, exam.remoteId)
       val course = academicRepository?.getCourseById(exam.courseId)
       val code = course?.code ?: "RAD 101"
       val title = course?.title ?: "Medical Radiography"
