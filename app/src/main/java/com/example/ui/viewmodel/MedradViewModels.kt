@@ -235,7 +235,7 @@ class DashboardViewModel(
 data class CbtSessionState(
   val isExamMode: Boolean = false,
   val examId: Long? = null,
-  val courseTitle: String = "RAD 101 — Introduction to Radiography",
+  val courseTitle: String = "ANA 201 — GROSS ANATOMY OF UPPER AND LOWER LIMBS",
   val examTitle: String = "Daily Practice",
   val questions: List<QuestionEntity> = emptyList(),
   val currentIndex: Int = 0,
@@ -281,22 +281,24 @@ class CbtViewModel(
       }
 
       val course = academicRepository?.getCourseById(courseId)
+        ?: if (!customCode.isNullOrBlank()) academicRepository?.getCourseByCode(customCode) else null
+      val effectiveCourseId = course?.id ?: courseId
       val code = if (!customCode.isNullOrBlank() && !customCode.contains(courseId.toString())) {
         customCode
       } else {
-        course?.code ?: "RAD 101"
+        course?.code ?: "ANA 201"
       }
       val title = if (!customTitle.isNullOrBlank() && !customTitle.contains(courseId.toString())) {
         customTitle
       } else {
-        course?.title ?: "Medical Radiography"
+        course?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
       }
 
       val questions = if (specificQuestionIds.isNotEmpty()) {
         val specific = cbtRepository.getQuestionsByIds(specificQuestionIds)
-        if (specific.isNotEmpty()) specific else cbtRepository.getPracticeQuestions(courseId, questionCount)
+        if (specific.isNotEmpty()) specific else cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
       } else {
-        cbtRepository.getPracticeQuestions(courseId, questionCount)
+        cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
       }
 
       val displayExamTitle = if (course != null) {
@@ -325,8 +327,8 @@ class CbtViewModel(
       val durationSecs = exam.durationMinutes * 60
       val questions = cbtRepository.getExamQuestions(exam.courseId, exam.totalQuestions, exam.remoteId)
       val course = academicRepository?.getCourseById(exam.courseId)
-      val code = course?.code ?: "RAD 101"
-      val title = course?.title ?: "Medical Radiography"
+      val code = course?.code ?: "ANA 201"
+      val title = course?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
 
       val displayExamTitle = if (exam.title.isNotBlank()) exam.title else "$code — $title Mock Exam"
 
@@ -810,6 +812,7 @@ class AdminViewModel(
     onDone: () -> Unit
   ) {
     viewModelScope.launch {
+      val course = academicRepository.getCourseById(courseId)
       val q = QuestionEntity(
         courseId = courseId,
         topicId = topicId,
@@ -827,15 +830,15 @@ class AdminViewModel(
         questionType = questionType,
         assessmentTitle = assessmentTitle,
         marks = marks,
-        timeLimitSeconds = timeLimitSeconds
+        timeLimitSeconds = timeLimitSeconds,
+        remoteCourseId = course?.remoteId
       )
       val id = adminRepository.saveQuestion(q)
       val savedQuestion = q.copy(id = id)
       cloudSyncManager?.broadcastQuestion(savedQuestion)
 
-      val course = academicRepository.getCourseById(courseId)
-      val courseCode = course?.code ?: "RAD 101"
-      val courseTitle = course?.title ?: "Medical Radiography"
+      val courseCode = course?.code ?: "ANA 201"
+      val courseTitle = course?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
 
       if (publishTarget == "DAILY_SPRINT" || publishTarget == "ALL_SECTIONS") {
         val curSprint = dailySprintConfig.value
@@ -911,6 +914,7 @@ class AdminViewModel(
     onDone: () -> Unit
   ) {
     viewModelScope.launch {
+      val course = academicRepository.getCourseById(courseId)
       val exam = ExamEntity(
         courseId = courseId,
         title = title,
@@ -918,7 +922,8 @@ class AdminViewModel(
         durationMinutes = durationMinutes,
         totalQuestions = questionCount,
         isPremium = isPremium,
-        isPublished = true
+        isPublished = true,
+        remoteCourseId = course?.remoteId
       )
       val id = adminRepository.saveExam(exam)
       cloudSyncManager?.broadcastExam(exam.copy(id = id))
@@ -947,6 +952,7 @@ class AdminViewModel(
     onDone: () -> Unit
   ) {
     viewModelScope.launch {
+      val course = academicRepository.getCourseById(courseId)
       val mat = StudyMaterialEntity(
         courseId = courseId,
         topicId = topicId,
@@ -955,7 +961,8 @@ class AdminViewModel(
         contentType = type,
         contentBody = body,
         externalUrl = externalUrl,
-        isPremium = isPremium
+        isPremium = isPremium,
+        remoteCourseId = course?.remoteId
       )
       val id = adminRepository.saveMaterial(mat)
       cloudSyncManager?.broadcastMaterial(mat.copy(id = id))

@@ -377,7 +377,7 @@ fun DashboardScreen(
                   color = Color(0xFFF59E0B).copy(alpha = 0.2f)
                 ) {
                   Text(
-                    text = practiceCard.courseCode.ifBlank { "RAD ${practiceCard.courseId}" },
+                    text = practiceCard.courseCode.ifBlank { "ANA 201" },
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                     color = Color(0xFFB45309),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

@@ -85,6 +85,9 @@ interface AcademicDao {
   @Query("SELECT * FROM courses WHERE remoteId = :remoteId LIMIT 1")
   suspend fun getCourseByRemoteId(remoteId: String): CourseEntity?
 
+  @Query("SELECT * FROM courses WHERE code = :code LIMIT 1")
+  suspend fun getCourseByCode(code: String): CourseEntity?
+
   @Query("SELECT * FROM courses WHERE id = :courseId LIMIT 1")
   fun observeCourseById(courseId: Long): Flow<CourseEntity?>
 

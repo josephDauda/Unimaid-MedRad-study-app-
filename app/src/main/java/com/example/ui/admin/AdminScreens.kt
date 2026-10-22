@@ -2097,7 +2097,7 @@ fun AddLibraryDialog(
         onClick = {
           if (name.isNotBlank() && url.isNotBlank()) {
             val selectedCourse = courses.find { it.id == selectedCourseId }
-            val courseCode = selectedCourse?.code ?: "RAD 101"
+            val courseCode = selectedCourse?.code ?: "ANA 201"
             onSave(selectedCourseId, courseCode, name.trim(), description.trim(), url.trim())
           }
         },
@@ -2922,7 +2922,7 @@ fun AdminLiveCloudSyncView(
         ) {
           val selectedCourse = courses.find { it.id == sprintCourseId } ?: courses.firstOrNull()
           OutlinedTextField(
-            value = selectedCourse?.let { "${it.code} — ${it.title}" } ?: "Select Course (Default RAD 101)",
+            value = selectedCourse?.let { "${it.code} — ${it.title}" } ?: "Select Course (Default ANA 201)",
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sprintCourseDropdownExpanded) },
@@ -3097,7 +3097,7 @@ fun AdminLiveCloudSyncView(
               title = sprintTitle.trim().ifBlank { "Radiography Challenge" },
               subtitle = sprintSubtitle.trim().ifBlank { "15 practice questions ready for your level" },
               courseId = sprintCourseId,
-              courseCode = selectedCourse?.code ?: "RAD 101",
+              courseCode = selectedCourse?.code ?: "ANA 201",
               questionCount = count,
               activeStudentsText = sprintActiveStudents.trim().ifBlank { "38 students active" },
               theme = sprintTheme,
@@ -3247,8 +3247,8 @@ fun AdminLiveCloudSyncView(
             val updated = PracticeCardConfig(
               isConfigured = practiceIsConfigured,
               courseId = practiceCourseId,
-              courseCode = selectedCourse?.code ?: "RAD 101",
-              courseTitle = practiceTitle.trim().ifBlank { selectedCourse?.title ?: "Radiation Physics & Safety" },
+              courseCode = selectedCourse?.code ?: "ANA 201",
+              courseTitle = practiceTitle.trim().ifBlank { selectedCourse?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS" },
               questionCount = count,
               questionIds = practiceQuestionIds
             )
@@ -3455,10 +3455,10 @@ fun AdminLiveCloudSyncView(
             val updated = MockCardConfig(
               isConfigured = mockIsConfigured,
               courseId = mockCourseId,
-              courseCode = selectedCourse?.code ?: "RAD 101",
-              courseTitle = selectedCourse?.title ?: "Radiation Physics & Safety",
+              courseCode = selectedCourse?.code ?: "ANA 201",
+              courseTitle = selectedCourse?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS",
               examId = mockExamId,
-              examTitle = mockTitle.trim().ifBlank { "${selectedCourse?.code ?: "RAD 101"} Mock CBT" },
+              examTitle = mockTitle.trim().ifBlank { "${selectedCourse?.code ?: "ANA 201"} Mock CBT" },
               questionCount = count,
               durationMinutes = dur,
               questionIds = mockQuestionIds

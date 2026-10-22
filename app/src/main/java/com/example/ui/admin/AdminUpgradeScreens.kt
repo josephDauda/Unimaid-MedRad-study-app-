@@ -311,7 +311,7 @@ fun AdminPushNotificationsView(
   var title by remember { mutableStateOf("") }
   var message by remember { mutableStateOf("") }
 
-  val targetOptions = listOf("All Students", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "RAD 101", "RAD 102", "RAD 201")
+  val targetOptions = listOf("All Students", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "ANA 201")
   var selectedTarget by remember { mutableStateOf(targetOptions.first()) }
   var targetExpanded by remember { mutableStateOf(false) }
 
@@ -366,7 +366,7 @@ fun AdminPushNotificationsView(
           value = title,
           onValueChange = { title = it },
           label = { Text("Notification Title") },
-          placeholder = { Text("e.g. RAD 101 Mock Exam Scheduled for Friday", color = com.example.ui.theme.TextMuted) },
+          placeholder = { Text("e.g. ANA 201 CBT Scheduled for Friday", color = com.example.ui.theme.TextMuted) },
           modifier = Modifier
             .fillMaxWidth()
             .testTag("admin_notification_title_input"),

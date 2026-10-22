@@ -22,13 +22,13 @@ interface QuestionDao {
   @Query("SELECT * FROM questions ORDER BY id ASC")
   suspend fun getAllQuestionsList(): List<QuestionEntity>
 
-  @Query("SELECT * FROM questions WHERE courseId = :courseId ORDER BY id ASC")
+  @Query("SELECT * FROM questions WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) ORDER BY id ASC")
   fun getQuestionsForCourse(courseId: Long): Flow<List<QuestionEntity>>
 
-  @Query("SELECT * FROM questions WHERE courseId = :courseId AND isPublished = 1 ORDER BY RANDOM() LIMIT :limit")
+  @Query("SELECT * FROM questions WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) AND isPublished = 1 ORDER BY RANDOM() LIMIT :limit")
   suspend fun getRandomQuestionsForCourse(courseId: Long, limit: Int): List<QuestionEntity>
 
-  @Query("SELECT * FROM questions WHERE courseId = :courseId AND isPublished = 1 ORDER BY id ASC")
+  @Query("SELECT * FROM questions WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) AND isPublished = 1 ORDER BY id ASC")
   suspend fun getPublishedQuestionsForCourseList(courseId: Long): List<QuestionEntity>
 
   @Query("SELECT * FROM questions WHERE id = :id LIMIT 1")
@@ -73,8 +73,11 @@ interface ExamDao {
   @Query("SELECT * FROM exams WHERE isPublished = 1 ORDER BY id DESC")
   fun getPublishedExams(): Flow<List<ExamEntity>>
 
-  @Query("SELECT * FROM exams WHERE courseId = :courseId AND isPublished = 1 ORDER BY id DESC")
+  @Query("SELECT * FROM exams WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) AND isPublished = 1 ORDER BY id DESC")
   fun getExamsForCourse(courseId: Long): Flow<List<ExamEntity>>
+
+  @Query("SELECT * FROM exams WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) ORDER BY id ASC")
+  suspend fun getExamsForCourseList(courseId: Long): List<ExamEntity>
 
   @Query("SELECT * FROM exams WHERE id = :id LIMIT 1")
   suspend fun getExamById(id: Long): ExamEntity?
@@ -134,7 +137,7 @@ interface StudyMaterialDao {
   @Query("SELECT * FROM study_materials ORDER BY id DESC")
   fun getAllMaterials(): Flow<List<StudyMaterialEntity>>
 
-  @Query("SELECT * FROM study_materials WHERE courseId = :courseId ORDER BY id DESC")
+  @Query("SELECT * FROM study_materials WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) ORDER BY id DESC")
   fun getMaterialsForCourse(courseId: Long): Flow<List<StudyMaterialEntity>>
 
   @Query("SELECT * FROM study_materials WHERE id = :id LIMIT 1")
@@ -188,10 +191,10 @@ interface CourseLibraryDao {
   @Query("SELECT * FROM course_libraries ORDER BY id DESC")
   fun getAllLibraries(): Flow<List<CourseLibraryEntity>>
 
-  @Query("SELECT * FROM course_libraries WHERE courseId = :courseId ORDER BY id DESC")
+  @Query("SELECT * FROM course_libraries WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) ORDER BY id DESC")
   fun getLibrariesForCourse(courseId: Long): Flow<List<CourseLibraryEntity>>
 
-  @Query("SELECT * FROM course_libraries WHERE courseId = :courseId ORDER BY id DESC")
+  @Query("SELECT * FROM course_libraries WHERE (courseId = :courseId OR remoteCourseId = (SELECT remoteId FROM courses WHERE id = :courseId LIMIT 1)) ORDER BY id DESC")
   suspend fun getLibrariesForCourseList(courseId: Long): List<CourseLibraryEntity>
 
   @Query("SELECT * FROM course_libraries WHERE id = :id LIMIT 1")

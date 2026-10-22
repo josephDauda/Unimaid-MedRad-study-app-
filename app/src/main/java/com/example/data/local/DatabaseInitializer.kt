@@ -17,16 +17,67 @@ object DatabaseInitializer {
       val academicDao = database.academicDao()
       val questionDao = database.questionDao()
 
-      // Clean up any old demo questions from offline cache so all content is live & admin-managed
+      val examDao = database.examDao()
+      val materialDao = database.studyMaterialDao()
+      val libraryDao = database.courseLibraryDao()
+
+      // 1. Purge all demo/unverified items and old initial courses as requested
       try {
-        val existingQuestions = questionDao.getAllQuestionsList()
-        val demoItems = existingQuestions.filter { it.isDemo || it.questionText.startsWith("[Demo Question]") }
-        for (dq in demoItems) {
-          questionDao.deleteQuestion(dq)
+        val existingCourses = academicDao.getCoursesList()
+        // Remove all courses except ANA 201
+        for (dc in existingCourses) {
+          val normalizedCode = dc.code.trim().replace(" ", "").uppercase()
+          if (normalizedCode != "ANA201") {
+            academicDao.deleteCourse(dc)
+          }
         }
       } catch (_: Exception) {}
 
-      // 1. Ensure basic academic organizational hierarchy exists for University of Maiduguri
+      try {
+        val existingQuestions = questionDao.getAllQuestionsList()
+        val anaCourse = academicDao.getCoursesList().firstOrNull { it.code.trim().replace(" ", "").uppercase() == "ANA201" }
+        val anaId = anaCourse?.id
+        for (dq in existingQuestions) {
+          if (dq.isDemo || dq.courseId != anaId || dq.questionText.startsWith("[Demo Question]") || dq.questionText.contains("demo", ignoreCase = true)) {
+            questionDao.deleteQuestion(dq)
+          }
+        }
+      } catch (_: Exception) {}
+
+      try {
+        val existingMaterials = materialDao.getAllMaterialsList()
+        val anaCourse = academicDao.getCoursesList().firstOrNull { it.code.trim().replace(" ", "").uppercase() == "ANA201" }
+        val anaId = anaCourse?.id
+        for (dm in existingMaterials) {
+          if (dm.courseId != anaId || dm.title.contains("demo", ignoreCase = true)) {
+            materialDao.deleteMaterial(dm)
+          }
+        }
+      } catch (_: Exception) {}
+
+      try {
+        val existingExams = examDao.getAllExamsList()
+        val anaCourse = academicDao.getCoursesList().firstOrNull { it.code.trim().replace(" ", "").uppercase() == "ANA201" }
+        val anaId = anaCourse?.id
+        for (de in existingExams) {
+          if (de.courseId != anaId || de.title.contains("demo", ignoreCase = true)) {
+            examDao.deleteExam(de)
+          }
+        }
+      } catch (_: Exception) {}
+
+      try {
+        val existingLibraries = libraryDao.getAllLibrariesList()
+        val anaCourse = academicDao.getCoursesList().firstOrNull { it.code.trim().replace(" ", "").uppercase() == "ANA201" }
+        val anaId = anaCourse?.id
+        for (dl in existingLibraries) {
+          if (dl.courseId != anaId || dl.name.contains("demo", ignoreCase = true)) {
+            libraryDao.deleteLibrary(dl)
+          }
+        }
+      } catch (_: Exception) {}
+
+      // 2. Ensure basic academic organizational hierarchy exists for University of Maiduguri
       val universities = academicDao.getUniversitiesList()
       var uniId: Long = 1
       if (universities.isEmpty()) {
@@ -69,36 +120,25 @@ object DatabaseInitializer {
         deptId = departments.first().id
       }
 
-      // Ensure base RAD 101 course and topics structure exists for departmental mapping
-      val existingCourse = academicDao.getCourseById(1)
-      if (existingCourse == null) {
-        val courseId = academicDao.insertCourse(
-          CourseEntity(
-            id = 1,
-            departmentId = deptId,
-            code = "RAD 101",
-            title = "Introduction to Radiography",
-            level = "100 Level",
-            semester = "First Semester",
-            description = "Foundational principles of medical radiography, discovery and nature of X-radiation, radiation protection (ALARA), radiographic equipment, and clinical ethics in radiology."
-          )
-        )
+      // 3. Populate strictly ANA 201: GROSS ANATOMY OF UPPER AND LOWER LIMBS mapped to authoritative Supabase remote ID
+      val authoritativeCourse = CourseEntity(
+        id = 1L,
+        departmentId = deptId,
+        code = "ANA 201",
+        title = "GROSS ANATOMY OF UPPER AND LOWER LIMBS",
+        level = "200 Level",
+        semester = "First Semester",
+        description = "GROSS ANATOMY OF UPPER AND LOWER LIMBS",
+        remoteId = "5b1a35b9-ffc6-4427-8d72-0006d1ba6704"
+      )
 
-        academicDao.insertTopic(
-          TopicEntity(courseId = courseId, name = "Fundamentals & Scope of Radiography", orderIndex = 1)
-        )
-        academicDao.insertTopic(
-          TopicEntity(courseId = courseId, name = "Discovery & Nature of X-rays (Röntgen 1895)", orderIndex = 2)
-        )
-        academicDao.insertTopic(
-          TopicEntity(courseId = courseId, name = "Radiation Protection & ALARA Principles", orderIndex = 3)
-        )
-        academicDao.insertTopic(
-          TopicEntity(courseId = courseId, name = "Radiographic Equipment & X-ray Tube Construction", orderIndex = 4)
-        )
-        academicDao.insertTopic(
-          TopicEntity(courseId = courseId, name = "Medical Ethics & Patient Care in Imaging", orderIndex = 5)
-        )
+      val existingByRemote = academicDao.getCourseByRemoteId(authoritativeCourse.remoteId!!)
+      val existingByCode = academicDao.getCourseByCode(authoritativeCourse.code)
+      if (existingByRemote == null && existingByCode == null) {
+        academicDao.insertCourse(authoritativeCourse)
+      } else {
+        val targetId = existingByRemote?.id ?: existingByCode?.id ?: 1L
+        academicDao.insertCourse(authoritativeCourse.copy(id = targetId))
       }
 
       // 2. Ensure Default Authenticated Admin & Student Accounts exist if not present

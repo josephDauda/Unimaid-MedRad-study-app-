@@ -889,7 +889,7 @@ fun GoogleDriveLibraryCard(
             color = MaterialTheme.colorScheme.primaryContainer
           ) {
             Text(
-              text = library.courseCode.ifBlank { "RAD 101" },
+              text = library.courseCode.ifBlank { "ANA 201" },
               style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
               color = MaterialTheme.colorScheme.onPrimaryContainer,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)

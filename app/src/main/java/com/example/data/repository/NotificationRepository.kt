@@ -390,11 +390,19 @@ class NotificationRepository(
       dao.insertNotification(localEntity)
 
       // 2. Push to Supabase announcements table using verified schema columns
+      // Note: PostgreSQL constraint announcements_priority_check requires lowercase: ('low', 'normal', 'high', 'urgent')
+      val supabasePriority = when (priority.trim().lowercase()) {
+        "urgent" -> "urgent"
+        "exam alert", "exam", "high", "critical" -> "high"
+        "low" -> "low"
+        else -> "normal"
+      }
+
       val annPayload = JSONObject().apply {
         put("id", uuid)
         put("title", trimmedTitle)
         put("message", trimmedMessage)
-        put("priority", priority)
+        put("priority", supabasePriority)
         put("author", author)
         put("target", target)
         put("is_published", true)
@@ -417,7 +425,7 @@ class NotificationRepository(
           put("id", uuid)
           put("title", trimmedTitle)
           put("message", trimmedMessage)
-          put("priority", priority)
+          put("priority", supabasePriority)
           put("is_published", true)
         }
         val fallbackRes = supabaseClient.restPost("announcements", minimalPayload.toString(), upsert = true)
@@ -497,10 +505,17 @@ class NotificationRepository(
       )
       dao.updateNotification(updated)
 
+      val supabasePriority = when (priority.trim().lowercase()) {
+        "urgent" -> "urgent"
+        "exam alert", "exam", "high", "critical" -> "high"
+        "low" -> "low"
+        else -> "normal"
+      }
+
       val patchPayload = JSONObject().apply {
         put("title", updated.title)
         put("message", updated.message)
-        put("priority", updated.priority)
+        put("priority", supabasePriority)
       }
       val res = supabaseClient.restPatch("announcements?id=eq.$id", patchPayload.toString())
       realtimeManager?.dispatchRealtimeEvent("announcements", "UPDATE", patchPayload.put("id", id))
@@ -618,9 +633,9 @@ class NotificationRepository(
     for (lvl in levels) {
       if (text.contains(lvl, ignoreCase = true)) return lvl
     }
-    val rads = listOf("RAD 101", "RAD 102", "RAD 201", "RAD 202", "RAD 301", "RAD 401", "RAD 501")
-    for (rad in rads) {
-      if (text.contains(rad, ignoreCase = true)) return rad
+    val courseCodes = listOf("ANA 201", "RAD 101", "RAD 102", "RAD 201", "RAD 202", "RAD 301", "RAD 401", "RAD 501")
+    for (code in courseCodes) {
+      if (text.contains(code, ignoreCase = true)) return code
     }
     return "All Students"
   }

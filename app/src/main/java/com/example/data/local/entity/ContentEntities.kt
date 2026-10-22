@@ -19,7 +19,7 @@ data class QuestionEntity(
   val difficulty: String = "Medium", // "Easy", "Medium", "Hard"
   val isPremium: Boolean = false,
   val isPublished: Boolean = true,
-  val isDemo: Boolean = true, // Clearly labelled Demo Question as per guidelines
+  val isDemo: Boolean = false,
   val questionType: String = "MULTIPLE_CHOICE", // "MULTIPLE_CHOICE", "TRUE_FALSE", "FILL_IN_BLANK", "IMAGE_DIAGRAM", "DRAWING_LABEL"
   val assessmentTitle: String = "General Practice",
   val imageUrl: String? = null,

@@ -63,12 +63,12 @@ data class AboutAppContent(
 
 data class DailyCbtSprintConfig(
   val badge: String = "DAILY CBT SPRINT",
-  val title: String = "Radiography Challenge",
-  val subtitle: String = "15 practice questions ready for your level",
+  val title: String = "Gross Anatomy Sprint",
+  val subtitle: String = "Practice questions ready for your level",
   val courseId: Long = 1L,
-  val courseCode: String = "RAD 101",
-  val questionCount: Int = 15,
-  val activeStudentsText: String = "38 students active",
+  val courseCode: String = "ANA 201",
+  val questionCount: Int = 0,
+  val activeStudentsText: String = "Students active",
   val theme: String = "NAVY_GOLD",
   val questionIds: List<Long> = emptyList()
 )
@@ -76,20 +76,20 @@ data class DailyCbtSprintConfig(
 data class PracticeCardConfig(
   val isConfigured: Boolean = true,
   val courseId: Long = 1L,
-  val courseCode: String = "RAD 101",
-  val courseTitle: String = "Radiation Physics & Safety",
-  val questionCount: Int = 15,
+  val courseCode: String = "ANA 201",
+  val courseTitle: String = "GROSS ANATOMY OF UPPER AND LOWER LIMBS",
+  val questionCount: Int = 0,
   val questionIds: List<Long> = emptyList()
 )
 
 data class MockCardConfig(
   val isConfigured: Boolean = true,
   val courseId: Long = 1L,
-  val courseCode: String = "RAD 101",
-  val courseTitle: String = "Radiation Physics & Safety",
+  val courseCode: String = "ANA 201",
+  val courseTitle: String = "GROSS ANATOMY OF UPPER AND LOWER LIMBS",
   val examId: Long = 0L,
-  val examTitle: String = "RAD 101 Mock Exam",
-  val questionCount: Int = 15,
+  val examTitle: String = "ANA 201 Mock Exam",
+  val questionCount: Int = 0,
   val durationMinutes: Int = 30,
   val questionIds: List<Long> = emptyList()
 )
@@ -160,12 +160,12 @@ class CloudSyncManager(
   private val _dailySprintConfig = MutableStateFlow(
     DailyCbtSprintConfig(
       badge = prefs.getString("sprint_badge", "DAILY CBT SPRINT") ?: "DAILY CBT SPRINT",
-      title = prefs.getString("sprint_title", "Radiography Challenge") ?: "Radiography Challenge",
-      subtitle = prefs.getString("sprint_subtitle", "15 practice questions ready for your level") ?: "15 practice questions ready for your level",
+      title = prefs.getString("sprint_title", "Gross Anatomy Sprint") ?: "Gross Anatomy Sprint",
+      subtitle = prefs.getString("sprint_subtitle", "Practice questions ready for your level") ?: "Practice questions ready for your level",
       courseId = prefs.getLong("sprint_course_id", 1L),
-      courseCode = prefs.getString("sprint_course_code", "RAD 101") ?: "RAD 101",
-      questionCount = prefs.getInt("sprint_question_count", 15),
-      activeStudentsText = prefs.getString("sprint_active_students", "38 students active") ?: "38 students active",
+      courseCode = prefs.getString("sprint_course_code", "ANA 201") ?: "ANA 201",
+      questionCount = prefs.getInt("sprint_question_count", 0),
+      activeStudentsText = prefs.getString("sprint_active_students", "Students active") ?: "Students active",
       theme = prefs.getString("sprint_theme", prefs.getString("global_card_style", "NAVY_GOLD") ?: "NAVY_GOLD") ?: "NAVY_GOLD",
       questionIds = prefs.getString("sprint_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
     )
@@ -176,9 +176,9 @@ class CloudSyncManager(
     PracticeCardConfig(
       isConfigured = prefs.getBoolean("practice_card_is_active", true),
       courseId = prefs.getLong("practice_card_course_id", 1L),
-      courseCode = prefs.getString("practice_card_course_code", "RAD 101") ?: "RAD 101",
-      courseTitle = prefs.getString("practice_card_course_title", "Radiation Physics & Safety") ?: "Radiation Physics & Safety",
-      questionCount = prefs.getInt("practice_card_question_count", 15),
+      courseCode = prefs.getString("practice_card_course_code", "ANA 201") ?: "ANA 201",
+      courseTitle = prefs.getString("practice_card_course_title", "GROSS ANATOMY OF UPPER AND LOWER LIMBS") ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS",
+      questionCount = prefs.getInt("practice_card_question_count", 0),
       questionIds = prefs.getString("practice_card_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
     )
   )
@@ -188,11 +188,11 @@ class CloudSyncManager(
     MockCardConfig(
       isConfigured = prefs.getBoolean("mock_card_is_active", true),
       courseId = prefs.getLong("mock_card_course_id", 1L),
-      courseCode = prefs.getString("mock_card_course_code", "RAD 101") ?: "RAD 101",
-      courseTitle = prefs.getString("mock_card_course_title", "Radiation Physics & Safety") ?: "Radiation Physics & Safety",
+      courseCode = prefs.getString("mock_card_course_code", "ANA 201") ?: "ANA 201",
+      courseTitle = prefs.getString("mock_card_course_title", "GROSS ANATOMY OF UPPER AND LOWER LIMBS") ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS",
       examId = prefs.getLong("mock_card_exam_id", 0L),
-      examTitle = prefs.getString("mock_card_exam_title", "RAD 101 Mock Exam") ?: "RAD 101 Mock Exam",
-      questionCount = prefs.getInt("mock_card_question_count", 15),
+      examTitle = prefs.getString("mock_card_exam_title", "ANA 201 Mock Exam") ?: "ANA 201 Mock Exam",
+      questionCount = prefs.getInt("mock_card_question_count", 0),
       durationMinutes = prefs.getInt("mock_card_duration_minutes", 30),
       questionIds = prefs.getString("mock_card_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
     )
@@ -968,6 +968,7 @@ class CloudSyncManager(
       val pageSize = 100
       var hasMore = true
       var totalProcessed = 0
+      val remoteCourseUuids = mutableSetOf<String>()
       while (hasMore) {
         val res = supabaseClient.restGet("courses?select=*&order=id.asc&limit=$pageSize&offset=$offset")
         if (res.isFailure) {
@@ -982,15 +983,19 @@ class CloudSyncManager(
         } else {
           for (c in list) {
             val remoteUuid = c.id.toString()
-            val existing = database.academicDao().getCourseByRemoteId(remoteUuid)
-            val localId = existing?.id ?: FlexibleIdHelper.toPositiveLong(c.id, 0L)
+            remoteCourseUuids.add(remoteUuid)
+            val existingByRemote = database.academicDao().getCourseByRemoteId(remoteUuid)
+            val existingByCode = if (existingByRemote == null && !c.code.isNullOrBlank()) {
+              database.academicDao().getCourseByCode(c.code)
+            } else null
+            val localId = existingByRemote?.id ?: existingByCode?.id ?: FlexibleIdHelper.toPositiveLong(c.id, 0L)
             database.academicDao().insertCourse(
               CourseEntity(
                 id = localId,
                 departmentId = FlexibleIdHelper.toPositiveLong(c.departmentId, 1L),
-                code = c.code ?: "RAD 101",
+                code = c.code ?: "ANA 201",
                 title = c.title ?: "Academic Course",
-                level = c.level ?: "100 Level",
+                level = c.level ?: "200 Level",
                 semester = c.semester ?: "First Semester",
                 description = c.description ?: "",
                 remoteId = remoteUuid
@@ -1003,6 +1008,12 @@ class CloudSyncManager(
           } else {
             offset += pageSize
           }
+        }
+      }
+      val localCourses = database.academicDao().getCoursesList()
+      for (lc in localCourses) {
+        if (lc.remoteId != null && !remoteCourseUuids.contains(lc.remoteId)) {
+          database.academicDao().deleteCourse(lc)
         }
       }
       true
@@ -1019,6 +1030,7 @@ class CloudSyncManager(
       val pageSize = 100
       var hasMore = true
       var totalProcessed = 0
+      val remoteExamUuids = mutableSetOf<String>()
       while (hasMore) {
         val res = supabaseClient.restGet("exams?select=*&order=id.asc&limit=$pageSize&offset=$offset")
         if (res.isFailure) {
@@ -1033,6 +1045,7 @@ class CloudSyncManager(
         } else {
           for (e in list) {
             val remoteUuid = e.id.toString()
+            remoteExamUuids.add(remoteUuid)
             val courseRemoteId = e.courseId?.toString()
             val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
             val localCourseId = localCourse?.id ?: FlexibleIdHelper.toPositiveLong(e.courseId, 1L)
@@ -1061,6 +1074,12 @@ class CloudSyncManager(
           }
         }
       }
+      val localExams = database.examDao().getAllExamsList()
+      for (le in localExams) {
+        if (le.remoteId != null && !remoteExamUuids.contains(le.remoteId)) {
+          database.examDao().deleteExam(le)
+        }
+      }
       true
     } catch (e: Exception) {
       Log.e(tag, "Error parsing exams: ${e.message}")
@@ -1075,6 +1094,7 @@ class CloudSyncManager(
       val pageSize = 100
       var hasMore = true
       var totalProcessed = 0
+      val remoteQuestionUuids = mutableSetOf<String>()
       while (hasMore) {
         val endpoint = if (courseId != null) {
           val courseEntity = database.academicDao().getCourseById(courseId)
@@ -1096,6 +1116,7 @@ class CloudSyncManager(
         } else {
           for (q in list) {
             val remoteUuid = q.id.toString()
+            remoteQuestionUuids.add(remoteUuid)
             val examRemoteId = q.examId?.toString()
             val courseRemoteId = q.courseId?.toString()
             val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
@@ -1139,6 +1160,12 @@ class CloudSyncManager(
           }
         }
       }
+      val localQuestions = if (courseId != null) database.questionDao().getAllQuestionsList().filter { it.courseId == courseId } else database.questionDao().getAllQuestionsList()
+      for (lq in localQuestions) {
+        if (lq.remoteId != null && !remoteQuestionUuids.contains(lq.remoteId)) {
+          database.questionDao().deleteQuestion(lq)
+        }
+      }
       true
     } catch (e: Exception) {
       Log.e(tag, "Error parsing questions: ${e.message}")
@@ -1153,6 +1180,7 @@ class CloudSyncManager(
       val pageSize = 100
       var hasMore = true
       var totalProcessed = 0
+      val remoteMaterialUuids = mutableSetOf<String>()
       while (hasMore) {
         val endpoint = if (courseId != null) {
           val courseEntity = database.academicDao().getCourseById(courseId)
@@ -1174,6 +1202,7 @@ class CloudSyncManager(
         } else {
           for (m in list) {
             val remoteUuid = m.id.toString()
+            remoteMaterialUuids.add(remoteUuid)
             val courseRemoteId = m.courseId?.toString()
             val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
             val localCourseId = localCourse?.id ?: FlexibleIdHelper.toPositiveLong(m.courseId, 1L)
@@ -1203,6 +1232,12 @@ class CloudSyncManager(
           }
         }
       }
+      val localMaterials = if (courseId != null) database.studyMaterialDao().getAllMaterialsList().filter { it.courseId == courseId } else database.studyMaterialDao().getAllMaterialsList()
+      for (lm in localMaterials) {
+        if (lm.remoteId != null && !remoteMaterialUuids.contains(lm.remoteId)) {
+          database.studyMaterialDao().deleteMaterial(lm)
+        }
+      }
       true
     } catch (e: Exception) {
       Log.e(tag, "Error parsing materials: ${e.message}")
@@ -1217,6 +1252,7 @@ class CloudSyncManager(
       val pageSize = 100
       var hasMore = true
       var totalProcessed = 0
+      val remoteLibUuids = mutableSetOf<String>()
       while (hasMore) {
         val endpoint = if (courseId != null) {
           val courseEntity = database.academicDao().getCourseById(courseId)
@@ -1238,6 +1274,7 @@ class CloudSyncManager(
         } else {
           for (l in list) {
             val remoteUuid = l.id.toString()
+            remoteLibUuids.add(remoteUuid)
             val courseRemoteId = l.courseId?.toString()
             val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
             val localCourseId = localCourse?.id ?: FlexibleIdHelper.toPositiveLong(l.courseId, 1L)
@@ -1250,7 +1287,7 @@ class CloudSyncManager(
                 CourseLibraryEntity(
                   id = localId,
                   courseId = localCourseId,
-                  courseCode = l.courseCode ?: "RAD 101",
+                  courseCode = l.courseCode ?: "ANA 201",
                   name = libName,
                   description = l.description ?: "",
                   externalUrl = libUrl,
@@ -1267,6 +1304,12 @@ class CloudSyncManager(
           } else {
             offset += pageSize
           }
+        }
+      }
+      val localLibs = if (courseId != null) database.courseLibraryDao().getAllLibrariesList().filter { it.courseId == courseId } else database.courseLibraryDao().getAllLibrariesList()
+      for (ll in localLibs) {
+        if (ll.remoteId != null && !remoteLibUuids.contains(ll.remoteId)) {
+          database.courseLibraryDao().deleteLibrary(ll)
         }
       }
       true
@@ -1603,12 +1646,18 @@ class CloudSyncManager(
   ): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
       val id = java.util.UUID.randomUUID().toString()
+      val supabasePriority = when (priority.trim().lowercase()) {
+        "urgent" -> "urgent"
+        "exam alert", "exam", "high", "critical" -> "high"
+        "low" -> "low"
+        else -> "normal"
+      }
       val announcement = SupabaseAnnouncement(
         id = id,
         title = title,
         message = message,
         author = author,
-        priority = priority,
+        priority = supabasePriority,
         target = target
       )
       val json = supabaseClient.moshi.adapter(SupabaseAnnouncement::class.java).toJson(announcement)
@@ -1617,12 +1666,12 @@ class CloudSyncManager(
       // Fallback for missing author or target column in Supabase schema
       if (res.isFailure) {
         val err = res.exceptionOrNull()?.message ?: ""
-        if (err.contains("PGRST204") || err.contains("Could not find the") || err.contains("does not exist")) {
+        if (err.contains("PGRST204") || err.contains("Could not find the") || err.contains("does not exist") || err.contains("23514")) {
           val corePayload = JSONObject().apply {
             put("id", id)
             put("title", title)
             put("message", "[Audience: $target]\n\n$message")
-            put("priority", priority)
+            put("priority", supabasePriority)
             put("is_published", true)
           }
           res = supabaseClient.restPost("announcements", corePayload.toString(), upsert = true)
@@ -1778,120 +1827,200 @@ class CloudSyncManager(
 
   suspend fun broadcastQuestion(q: QuestionEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val remoteUuid = q.remoteId ?: UUID.randomUUID().toString()
+      val remoteUuid = if (!q.remoteId.isNullOrBlank() && q.remoteId.length == 36) q.remoteId else UUID.randomUUID().toString()
       val parentCourse = database.academicDao().getCourseById(q.courseId)
-      val courseRemoteUuid = q.remoteCourseId ?: parentCourse?.remoteId
-      val examRemoteUuid = q.remoteExamId
-      if (q.remoteId == null || (q.remoteCourseId == null && courseRemoteUuid != null)) {
-        database.questionDao().insertQuestion(q.copy(remoteId = remoteUuid, remoteCourseId = courseRemoteUuid))
+      var courseRemoteUuid = q.remoteCourseId ?: parentCourse?.remoteId
+      if (courseRemoteUuid.isNullOrBlank() || courseRemoteUuid.length != 36) {
+        val courseByCode = parentCourse?.let { database.academicDao().getCourseByCode(it.code) }
+        courseRemoteUuid = courseByCode?.remoteId?.takeIf { it.length == 36 } ?: UUID.randomUUID().toString()
+        if (parentCourse != null) {
+          database.academicDao().insertCourse(parentCourse.copy(remoteId = courseRemoteUuid))
+        }
       }
-      val qDto = SupabaseQuestion(
-        id = remoteUuid,
-        examId = examRemoteUuid,
-        courseId = courseRemoteUuid,
-        topicId = 1,
-        questionText = q.questionText,
-        optionA = q.optionA,
-        optionB = q.optionB,
-        optionC = q.optionC.takeIf { it.isNotBlank() },
-        optionD = q.optionD.takeIf { it.isNotBlank() },
-        correctAnswer = q.correctAnswer,
-        explanation = q.explanation,
-        difficulty = q.difficulty,
-        questionType = if (q.questionType.equals("MULTIPLE_CHOICE", ignoreCase = true)) "mcq" else q.questionType,
-        assessmentTitle = q.assessmentTitle,
-        marks = q.marks.toDouble(),
-        timeLimitSeconds = q.timeLimitSeconds,
-        imageUrl = q.imageUrl,
-        isPremium = q.isPremium,
-        isPublished = q.isPublished,
-        isDemo = q.isDemo
+
+      // Supabase questions table strictly requires a non-null exam_id referencing an existing exam
+      var examRemoteUuid = q.remoteExamId
+      if (examRemoteUuid.isNullOrBlank() || examRemoteUuid.length != 36) {
+        val courseExams = database.examDao().getExamsForCourseList(q.courseId)
+        val validExam = courseExams.firstOrNull { !it.remoteId.isNullOrBlank() && it.remoteId.length == 36 }
+        if (validExam != null) {
+          examRemoteUuid = validExam.remoteId
+        } else {
+          val allExams = database.examDao().getAllExamsList()
+          val anyExam = allExams.firstOrNull { !it.remoteId.isNullOrBlank() && it.remoteId.length == 36 }
+          if (anyExam != null) {
+            examRemoteUuid = anyExam.remoteId
+          } else {
+            val newExamId = UUID.randomUUID().toString()
+            val newExam = ExamEntity(
+              courseId = q.courseId,
+              title = "${parentCourse?.code ?: "RAD"} Continuous Assessment",
+              description = "Continuous Assessment and Question Bank for ${parentCourse?.title ?: "Medical Radiography"}",
+              durationMinutes = 30,
+              totalQuestions = 15,
+              isPremium = false,
+              isPublished = true,
+              remoteId = newExamId,
+              remoteCourseId = courseRemoteUuid
+            )
+            val insertedId = database.examDao().insertExam(newExam)
+            broadcastExam(newExam.copy(id = insertedId))
+            examRemoteUuid = newExamId
+          }
+        }
+      }
+
+      database.questionDao().insertQuestion(
+        q.copy(
+          remoteId = remoteUuid,
+          remoteCourseId = courseRemoteUuid,
+          remoteExamId = examRemoteUuid,
+          isDemo = false
+        )
       )
-      val json = supabaseClient.moshi.adapter(SupabaseQuestion::class.java).toJson(qDto)
-      val res = supabaseClient.restPost("questions", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("questions", "INSERT", JSONObject(json))
+
+      val payload = JSONObject().apply {
+        put("id", remoteUuid)
+        put("course_id", courseRemoteUuid)
+        put("exam_id", examRemoteUuid)
+        put("topic_id", 1)
+        put("question_text", q.questionText)
+        put("option_a", q.optionA)
+        put("option_b", q.optionB)
+        put("option_c", q.optionC.takeIf { it.isNotBlank() })
+        put("option_d", q.optionD.takeIf { it.isNotBlank() })
+        put("correct_answer", q.correctAnswer)
+        put("explanation", q.explanation)
+        put("difficulty", q.difficulty)
+        put("question_type", if (q.questionType.equals("MULTIPLE_CHOICE", ignoreCase = true)) "mcq" else q.questionType)
+        put("assessment_title", q.assessmentTitle)
+        put("marks", q.marks.toDouble())
+        put("time_limit_seconds", q.timeLimitSeconds)
+        put("image_url", q.imageUrl)
+        put("is_active", true)
+        put("is_premium", q.isPremium)
+        put("is_published", q.isPublished)
+        put("is_demo", false)
+      }
+
+      val res = supabaseClient.restPost("questions", payload.toString(), upsert = true)
+      if (res.isFailure) {
+        Log.e(tag, "broadcastQuestion to Supabase failed: ${res.exceptionOrNull()?.message}")
+      }
+      realtimeManager?.dispatchRealtimeEvent("questions", "INSERT", payload)
       Result.success(res.isSuccess)
     } catch (e: Exception) {
+      Log.e(tag, "broadcastQuestion error: ${e.message}", e)
       Result.failure(e)
     }
   }
 
   suspend fun broadcastMaterial(mat: StudyMaterialEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val remoteUuid = mat.remoteId ?: UUID.randomUUID().toString()
+      val remoteUuid = if (!mat.remoteId.isNullOrBlank() && mat.remoteId.length == 36) mat.remoteId else UUID.randomUUID().toString()
       val parentCourse = database.academicDao().getCourseById(mat.courseId)
-      val courseRemoteUuid = mat.remoteCourseId ?: parentCourse?.remoteId
-      if (mat.remoteId == null || (mat.remoteCourseId == null && courseRemoteUuid != null)) {
-        database.studyMaterialDao().insertMaterial(mat.copy(remoteId = remoteUuid, remoteCourseId = courseRemoteUuid))
+      var courseRemoteUuid = mat.remoteCourseId ?: parentCourse?.remoteId
+      if (courseRemoteUuid.isNullOrBlank() || courseRemoteUuid.length != 36) {
+        val courseByCode = parentCourse?.let { database.academicDao().getCourseByCode(it.code) }
+        courseRemoteUuid = courseByCode?.remoteId?.takeIf { it.length == 36 } ?: UUID.randomUUID().toString()
+        if (parentCourse != null) {
+          database.academicDao().insertCourse(parentCourse.copy(remoteId = courseRemoteUuid))
+        }
       }
-      val mDto = SupabaseStudyMaterial(
-        id = remoteUuid,
-        courseId = courseRemoteUuid ?: mat.courseId,
-        topicId = 1,
-        title = mat.title,
-        description = mat.description,
-        contentType = mat.contentType,
-        contentBody = mat.contentBody,
-        externalUrl = mat.externalUrl,
-        isPremium = mat.isPremium
+
+      database.studyMaterialDao().insertMaterial(
+        mat.copy(remoteId = remoteUuid, remoteCourseId = courseRemoteUuid)
       )
-      val json = supabaseClient.moshi.adapter(SupabaseStudyMaterial::class.java).toJson(mDto)
-      val res = supabaseClient.restPost("study_materials", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("study_materials", "INSERT", JSONObject(json))
+
+      val payload = JSONObject().apply {
+        put("id", remoteUuid)
+        put("course_id", courseRemoteUuid)
+        put("topic_id", 1)
+        put("title", mat.title)
+        put("description", mat.description)
+        put("content_type", mat.contentType)
+        put("content_body", mat.contentBody)
+        put("external_url", mat.externalUrl ?: "")
+        put("file_url", mat.externalUrl ?: "")
+        put("is_published", true)
+        put("is_premium", mat.isPremium)
+      }
+
+      val res = supabaseClient.restPost("study_materials", payload.toString(), upsert = true)
+      if (res.isFailure) {
+        Log.e(tag, "broadcastMaterial to Supabase failed: ${res.exceptionOrNull()?.message}")
+      }
+      realtimeManager?.dispatchRealtimeEvent("study_materials", "INSERT", payload)
       Result.success(res.isSuccess)
     } catch (e: Exception) {
+      Log.e(tag, "broadcastMaterial error: ${e.message}", e)
       Result.failure(e)
     }
   }
 
   suspend fun broadcastLibrary(lib: CourseLibraryEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val remoteUuid = lib.remoteId ?: UUID.randomUUID().toString()
+      val remoteUuid = if (!lib.remoteId.isNullOrBlank() && lib.remoteId.length == 36) lib.remoteId else UUID.randomUUID().toString()
       val parentCourse = database.academicDao().getCourseById(lib.courseId)
-      val courseRemoteUuid = lib.remoteCourseId ?: parentCourse?.remoteId
-      if (lib.remoteId == null || (lib.remoteCourseId == null && courseRemoteUuid != null)) {
-        database.courseLibraryDao().insertLibrary(lib.copy(remoteId = remoteUuid, remoteCourseId = courseRemoteUuid))
+      var courseRemoteUuid = lib.remoteCourseId ?: parentCourse?.remoteId
+      if (courseRemoteUuid.isNullOrBlank() || courseRemoteUuid.length != 36) {
+        val courseByCode = parentCourse?.let { database.academicDao().getCourseByCode(it.code) }
+        courseRemoteUuid = courseByCode?.remoteId?.takeIf { it.length == 36 } ?: UUID.randomUUID().toString()
+        if (parentCourse != null) {
+          database.academicDao().insertCourse(parentCourse.copy(remoteId = courseRemoteUuid))
+        }
       }
-      val lDto = SupabaseCourseLibrary(
-        id = remoteUuid,
-        courseId = courseRemoteUuid ?: lib.courseId,
-        courseCode = lib.courseCode,
-        name = lib.name,
-        title = lib.name,
-        description = lib.description,
-        url = lib.externalUrl,
-        externalUrl = lib.externalUrl,
-        isPublished = lib.isPublished
+
+      database.courseLibraryDao().insertLibrary(
+        lib.copy(remoteId = remoteUuid, remoteCourseId = courseRemoteUuid)
       )
-      val json = supabaseClient.moshi.adapter(SupabaseCourseLibrary::class.java).toJson(lDto)
-      val res = supabaseClient.restPost("course_libraries", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("course_libraries", "INSERT", JSONObject(json))
+
+      val payload = JSONObject().apply {
+        put("id", remoteUuid)
+        put("course_id", courseRemoteUuid)
+        put("course_code", lib.courseCode)
+        put("name", lib.name)
+        put("title", lib.name)
+        put("description", lib.description)
+        put("url", lib.externalUrl)
+        put("external_url", lib.externalUrl)
+        put("is_published", lib.isPublished)
+      }
+
+      val res = supabaseClient.restPost("course_libraries", payload.toString(), upsert = true)
+      if (res.isFailure) {
+        Log.e(tag, "broadcastLibrary to Supabase failed: ${res.exceptionOrNull()?.message}")
+      }
+      realtimeManager?.dispatchRealtimeEvent("course_libraries", "INSERT", payload)
       Result.success(res.isSuccess)
     } catch (e: Exception) {
+      Log.e(tag, "broadcastLibrary error: ${e.message}", e)
       Result.failure(e)
     }
   }
 
   suspend fun broadcastCourse(course: CourseEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val remoteUuid = course.remoteId ?: UUID.randomUUID().toString()
-      if (course.remoteId == null) {
-        database.academicDao().insertCourse(course.copy(remoteId = remoteUuid))
+      val remoteUuid = if (!course.remoteId.isNullOrBlank() && course.remoteId.length == 36) course.remoteId else UUID.randomUUID().toString()
+      database.academicDao().insertCourse(course.copy(remoteId = remoteUuid))
+      val payload = JSONObject().apply {
+        put("id", remoteUuid)
+        put("department_id", 1)
+        put("code", course.code)
+        put("title", course.title)
+        put("level", course.level)
+        put("semester", course.semester)
+        put("description", course.description)
+        put("is_published", true)
       }
-      val cDto = SupabaseCourse(
-        id = remoteUuid,
-        departmentId = 1,
-        code = course.code,
-        title = course.title,
-        level = course.level,
-        semester = course.semester,
-        description = course.description
-      )
-      val json = supabaseClient.moshi.adapter(SupabaseCourse::class.java).toJson(cDto)
-      val res = supabaseClient.restPost("courses", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("courses", "INSERT", JSONObject(json))
+      val res = supabaseClient.restPost("courses", payload.toString(), upsert = true)
+      if (res.isFailure) {
+        Log.e(tag, "broadcastCourse to Supabase failed: ${res.exceptionOrNull()?.message}")
+      }
+      realtimeManager?.dispatchRealtimeEvent("courses", "INSERT", payload)
       Result.success(res.isSuccess)
     } catch (e: Exception) {
+      Log.e(tag, "broadcastCourse error: ${e.message}", e)
       Result.failure(e)
     }
   }
@@ -1910,27 +2039,38 @@ class CloudSyncManager(
 
   suspend fun broadcastExam(exam: ExamEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val remoteUuid = exam.remoteId ?: UUID.randomUUID().toString()
+      val remoteUuid = if (!exam.remoteId.isNullOrBlank() && exam.remoteId.length == 36) exam.remoteId else UUID.randomUUID().toString()
       val parentCourse = database.academicDao().getCourseById(exam.courseId)
-      val courseRemoteUuid = exam.remoteCourseId ?: parentCourse?.remoteId
-      if (exam.remoteId == null || (exam.remoteCourseId == null && courseRemoteUuid != null)) {
-        database.examDao().insertExam(exam.copy(remoteId = remoteUuid, remoteCourseId = courseRemoteUuid))
+      var courseRemoteUuid = exam.remoteCourseId ?: parentCourse?.remoteId
+      if (courseRemoteUuid.isNullOrBlank() || courseRemoteUuid.length != 36) {
+        val courseByCode = parentCourse?.let { database.academicDao().getCourseByCode(it.code) }
+        courseRemoteUuid = courseByCode?.remoteId?.takeIf { it.length == 36 } ?: UUID.randomUUID().toString()
+        if (parentCourse != null) {
+          database.academicDao().insertCourse(parentCourse.copy(remoteId = courseRemoteUuid))
+        }
       }
-      val eDto = SupabaseExam(
-        id = remoteUuid,
-        courseId = courseRemoteUuid ?: exam.courseId,
-        title = exam.title,
-        description = exam.description,
-        durationMinutes = exam.durationMinutes,
-        totalMarks = exam.totalQuestions * 2,
-        passPercentage = 50,
-        isPublished = exam.isPublished
-      )
-      val json = supabaseClient.moshi.adapter(SupabaseExam::class.java).toJson(eDto)
-      val res = supabaseClient.restPost("exams", json, upsert = true)
-      realtimeManager?.dispatchRealtimeEvent("exams", "INSERT", JSONObject(json))
+
+      database.examDao().insertExam(exam.copy(remoteId = remoteUuid, remoteCourseId = courseRemoteUuid))
+
+      val payload = JSONObject().apply {
+        put("id", remoteUuid)
+        put("course_id", courseRemoteUuid)
+        put("title", exam.title)
+        put("description", exam.description)
+        put("duration_minutes", exam.durationMinutes)
+        put("total_marks", exam.totalQuestions * 2)
+        put("pass_percentage", 50)
+        put("is_published", exam.isPublished)
+      }
+
+      val res = supabaseClient.restPost("exams", payload.toString(), upsert = true)
+      if (res.isFailure) {
+        Log.e(tag, "broadcastExam to Supabase failed: ${res.exceptionOrNull()?.message}")
+      }
+      realtimeManager?.dispatchRealtimeEvent("exams", "INSERT", payload)
       Result.success(res.isSuccess)
     } catch (e: Exception) {
+      Log.e(tag, "broadcastExam error: ${e.message}", e)
       Result.failure(e)
     }
   }
