@@ -1119,9 +1119,9 @@ class CloudSyncManager(
             remoteQuestionUuids.add(remoteUuid)
             val examRemoteId = q.examId?.toString()
             val courseRemoteId = q.courseId?.toString()
-            val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
             val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
-            val localCourseId = localExam?.courseId ?: localCourse?.id ?: courseId ?: 1L
+            val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
+            val localCourseId = localCourse?.id ?: localExam?.courseId ?: courseId ?: 1L
             val existing = database.questionDao().getQuestionByRemoteId(remoteUuid)
             val localId = existing?.id ?: FlexibleIdHelper.toPositiveLong(q.id, 0L)
 
@@ -1838,7 +1838,7 @@ class CloudSyncManager(
         }
       }
 
-      // Supabase questions table strictly requires a non-null exam_id referencing an existing exam
+      // Supabase questions table strictly requires a non-null exam_id referencing an existing exam for this specific course
       var examRemoteUuid = q.remoteExamId
       if (examRemoteUuid.isNullOrBlank() || examRemoteUuid.length != 36) {
         val courseExams = database.examDao().getExamsForCourseList(q.courseId)
@@ -1846,27 +1846,23 @@ class CloudSyncManager(
         if (validExam != null) {
           examRemoteUuid = validExam.remoteId
         } else {
-          val allExams = database.examDao().getAllExamsList()
-          val anyExam = allExams.firstOrNull { !it.remoteId.isNullOrBlank() && it.remoteId.length == 36 }
-          if (anyExam != null) {
-            examRemoteUuid = anyExam.remoteId
-          } else {
-            val newExamId = UUID.randomUUID().toString()
-            val newExam = ExamEntity(
-              courseId = q.courseId,
-              title = "${parentCourse?.code ?: "RAD"} Continuous Assessment",
-              description = "Continuous Assessment and Question Bank for ${parentCourse?.title ?: "Medical Radiography"}",
-              durationMinutes = 30,
-              totalQuestions = 15,
-              isPremium = false,
-              isPublished = true,
-              remoteId = newExamId,
-              remoteCourseId = courseRemoteUuid
-            )
-            val insertedId = database.examDao().insertExam(newExam)
-            broadcastExam(newExam.copy(id = insertedId))
-            examRemoteUuid = newExamId
-          }
+          val newExamId = UUID.randomUUID().toString()
+          val cCode = parentCourse?.code ?: "Course"
+          val cTitle = parentCourse?.title ?: "Academic Course"
+          val newExam = ExamEntity(
+            courseId = q.courseId,
+            title = "$cCode Continuous Assessment",
+            description = "Continuous Assessment and Question Bank for $cTitle",
+            durationMinutes = 30,
+            totalQuestions = 15,
+            isPremium = false,
+            isPublished = true,
+            remoteId = newExamId,
+            remoteCourseId = courseRemoteUuid
+          )
+          val insertedId = database.examDao().insertExam(newExam)
+          broadcastExam(newExam.copy(id = insertedId))
+          examRemoteUuid = newExamId
         }
       }
 
@@ -2025,16 +2021,29 @@ class CloudSyncManager(
     }
   }
 
-  suspend fun deleteCourseCloud(courseId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
+  suspend fun deleteCourseCloud(course: CourseEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val course = database.academicDao().getCourseById(courseId)
-      val targetId = course?.remoteId ?: courseId.toString()
-      val res = supabaseClient.restDelete("courses?id=eq.$targetId")
-      realtimeManager?.dispatchRealtimeEvent("courses", "DELETE", JSONObject().put("id", targetId))
-      Result.success(res.isSuccess)
+      val targetId = course.remoteId
+      if (!targetId.isNullOrBlank() && targetId.length == 36) {
+        supabaseClient.restDelete("questions?course_id=eq.$targetId")
+        supabaseClient.restDelete("study_materials?course_id=eq.$targetId")
+        supabaseClient.restDelete("course_libraries?course_id=eq.$targetId")
+        supabaseClient.restDelete("exams?course_id=eq.$targetId")
+        val res = supabaseClient.restDelete("courses?id=eq.$targetId")
+        realtimeManager?.dispatchRealtimeEvent("courses", "DELETE", JSONObject().put("id", targetId))
+        Result.success(res.isSuccess)
+      } else {
+        Result.success(true)
+      }
     } catch (e: Exception) {
+      Log.e(tag, "deleteCourseCloud error: ${e.message}", e)
       Result.failure(e)
     }
+  }
+
+  suspend fun deleteCourseCloud(courseId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
+    val course = database.academicDao().getCourseById(courseId)
+    if (course != null) deleteCourseCloud(course) else Result.success(true)
   }
 
   suspend fun broadcastExam(exam: ExamEntity): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -2075,52 +2084,94 @@ class CloudSyncManager(
     }
   }
 
-  suspend fun deleteExamCloud(examId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
+  suspend fun deleteExamCloud(exam: ExamEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val exam = database.examDao().getExamById(examId)
-      val targetId = exam?.remoteId ?: examId.toString()
-      val res = supabaseClient.restDelete("exams?id=eq.$targetId")
-      realtimeManager?.dispatchRealtimeEvent("exams", "DELETE", JSONObject().put("id", targetId))
-      Result.success(res.isSuccess)
+      val targetId = exam.remoteId
+      if (!targetId.isNullOrBlank() && targetId.length == 36) {
+        supabaseClient.restDelete("questions?exam_id=eq.$targetId")
+        val res = supabaseClient.restDelete("exams?id=eq.$targetId")
+        realtimeManager?.dispatchRealtimeEvent("exams", "DELETE", JSONObject().put("id", targetId))
+        Result.success(res.isSuccess)
+      } else {
+        Result.success(true)
+      }
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun deleteExamCloud(examId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
+    val exam = database.examDao().getExamById(examId)
+    if (exam != null) deleteExamCloud(exam) else Result.success(true)
+  }
+
+  suspend fun deleteQuestionCloud(q: QuestionEntity): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val targetId = q.remoteId
+      if (!targetId.isNullOrBlank() && targetId.length == 36) {
+        val res = supabaseClient.restDelete("questions?id=eq.$targetId")
+        realtimeManager?.dispatchRealtimeEvent("questions", "DELETE", JSONObject().put("id", targetId))
+        Result.success(res.isSuccess)
+      } else {
+        Result.success(true)
+      }
     } catch (e: Exception) {
       Result.failure(e)
     }
   }
 
   suspend fun deleteQuestionCloud(questionId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
+    val q = database.questionDao().getQuestionById(questionId)
+    if (q != null) deleteQuestionCloud(q) else Result.success(true)
+  }
+
+  suspend fun clearAllQuestionsCloud(): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val q = database.questionDao().getQuestionById(questionId)
-      val targetId = q?.remoteId ?: questionId.toString()
-      val res = supabaseClient.restDelete("questions?id=eq.$targetId")
-      realtimeManager?.dispatchRealtimeEvent("questions", "DELETE", JSONObject().put("id", targetId))
+      val res = supabaseClient.restDelete("questions?id=neq.00000000-0000-0000-0000-000000000000")
       Result.success(res.isSuccess)
+    } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun deleteMaterialCloud(mat: StudyMaterialEntity): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val targetId = mat.remoteId
+      if (!targetId.isNullOrBlank() && targetId.length == 36) {
+        val res = supabaseClient.restDelete("study_materials?id=eq.$targetId")
+        realtimeManager?.dispatchRealtimeEvent("study_materials", "DELETE", JSONObject().put("id", targetId))
+        Result.success(res.isSuccess)
+      } else {
+        Result.success(true)
+      }
     } catch (e: Exception) {
       Result.failure(e)
     }
   }
 
   suspend fun deleteMaterialCloud(materialId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
+    val mat = database.studyMaterialDao().getMaterialById(materialId)
+    if (mat != null) deleteMaterialCloud(mat) else Result.success(true)
+  }
+
+  suspend fun deleteLibraryCloud(lib: CourseLibraryEntity): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      val mat = database.studyMaterialDao().getMaterialById(materialId)
-      val targetId = mat?.remoteId ?: materialId.toString()
-      val res = supabaseClient.restDelete("study_materials?id=eq.$targetId")
-      realtimeManager?.dispatchRealtimeEvent("study_materials", "DELETE", JSONObject().put("id", targetId))
-      Result.success(res.isSuccess)
+      val targetId = lib.remoteId
+      if (!targetId.isNullOrBlank() && targetId.length == 36) {
+        val res = supabaseClient.restDelete("course_libraries?id=eq.$targetId")
+        realtimeManager?.dispatchRealtimeEvent("course_libraries", "DELETE", JSONObject().put("id", targetId))
+        Result.success(res.isSuccess)
+      } else {
+        Result.success(true)
+      }
     } catch (e: Exception) {
       Result.failure(e)
     }
   }
 
   suspend fun deleteLibraryCloud(libraryId: Long): Result<Boolean> = withContext(Dispatchers.IO) {
-    try {
-      val lib = database.courseLibraryDao().getLibraryById(libraryId)
-      val targetId = lib?.remoteId ?: libraryId.toString()
-      val res = supabaseClient.restDelete("course_libraries?id=eq.$targetId")
-      realtimeManager?.dispatchRealtimeEvent("course_libraries", "DELETE", JSONObject().put("id", targetId))
-      Result.success(res.isSuccess)
-    } catch (e: Exception) {
-      Result.failure(e)
-    }
+    val lib = database.courseLibraryDao().getLibraryById(libraryId)
+    if (lib != null) deleteLibraryCloud(lib) else Result.success(true)
   }
 
   suspend fun updateAboutAppManagement(content: AboutAppContent): Result<Boolean> = updateAboutAppContent(content)

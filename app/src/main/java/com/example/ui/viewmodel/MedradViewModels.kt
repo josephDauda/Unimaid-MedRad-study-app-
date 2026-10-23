@@ -295,7 +295,7 @@ class CbtViewModel(
       }
 
       val questions = if (specificQuestionIds.isNotEmpty()) {
-        val specific = cbtRepository.getQuestionsByIds(specificQuestionIds)
+        val specific = cbtRepository.getQuestionsByIds(specificQuestionIds).filter { it.courseId == effectiveCourseId }
         if (specific.isNotEmpty()) specific else cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
       } else {
         cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
@@ -325,7 +325,7 @@ class CbtViewModel(
     viewModelScope.launch {
       _sessionState.value = CbtSessionState(isLoading = true)
       val durationSecs = exam.durationMinutes * 60
-      val questions = cbtRepository.getExamQuestions(exam.courseId, exam.totalQuestions, exam.remoteId)
+      val questions = cbtRepository.getExamQuestions(exam.courseId, exam.totalQuestions, exam.remoteId).filter { it.courseId == exam.courseId }
       val course = academicRepository?.getCourseById(exam.courseId)
       val code = course?.code ?: "ANA 201"
       val title = course?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
@@ -778,8 +778,8 @@ class AdminViewModel(
 
   fun deleteCourse(course: CourseEntity) {
     viewModelScope.launch {
+      cloudSyncManager?.deleteCourseCloud(course)
       adminRepository.deleteCourse(course)
-      cloudSyncManager?.deleteCourseCloud(course.id)
       loadStats()
     }
   }
@@ -842,7 +842,8 @@ class AdminViewModel(
 
       if (publishTarget == "DAILY_SPRINT" || publishTarget == "ALL_SECTIONS") {
         val curSprint = dailySprintConfig.value
-        val updatedIds = (curSprint.questionIds + id).distinct()
+        val baseIds = if (curSprint.courseId == courseId) curSprint.questionIds else emptyList()
+        val updatedIds = (baseIds + id).distinct()
         val updatedSprint = curSprint.copy(
           courseId = courseId,
           courseCode = courseCode,
@@ -856,7 +857,8 @@ class AdminViewModel(
 
       if (publishTarget == "PRACTICE_CARD" || publishTarget == "ALL_SECTIONS") {
         val curPractice = practiceCardConfig.value
-        val updatedIds = (curPractice.questionIds + id).distinct()
+        val baseIds = if (curPractice.courseId == courseId) curPractice.questionIds else emptyList()
+        val updatedIds = (baseIds + id).distinct()
         val updatedPractice = curPractice.copy(
           isConfigured = true,
           courseId = courseId,
@@ -870,7 +872,8 @@ class AdminViewModel(
 
       if (publishTarget == "MOCK_EXAM" || publishTarget == "ALL_SECTIONS") {
         val curMock = mockCardConfig.value
-        val updatedIds = (curMock.questionIds + id).distinct()
+        val baseIds = if (curMock.courseId == courseId) curMock.questionIds else emptyList()
+        val updatedIds = (baseIds + id).distinct()
         val updatedMock = curMock.copy(
           isConfigured = true,
           courseId = courseId,
@@ -891,14 +894,15 @@ class AdminViewModel(
 
   fun deleteQuestion(q: QuestionEntity) {
     viewModelScope.launch {
+      cloudSyncManager?.deleteQuestionCloud(q)
       adminRepository.deleteQuestion(q)
-      cloudSyncManager?.deleteQuestionCloud(q.id)
       loadStats()
     }
   }
 
   fun clearAllQuestions() {
     viewModelScope.launch {
+      cloudSyncManager?.clearAllQuestionsCloud()
       adminRepository.clearAllQuestions()
       loadStats()
     }
@@ -934,8 +938,8 @@ class AdminViewModel(
 
   fun deleteExam(exam: ExamEntity) {
     viewModelScope.launch {
+      cloudSyncManager?.deleteExamCloud(exam)
       adminRepository.deleteExam(exam)
-      cloudSyncManager?.deleteExamCloud(exam.id)
       loadStats()
     }
   }
@@ -973,8 +977,8 @@ class AdminViewModel(
 
   fun deleteMaterial(mat: StudyMaterialEntity) {
     viewModelScope.launch {
+      cloudSyncManager?.deleteMaterialCloud(mat)
       adminRepository.deleteMaterial(mat)
-      cloudSyncManager?.deleteMaterialCloud(mat.id)
       loadStats()
     }
   }
@@ -1015,8 +1019,8 @@ class AdminViewModel(
 
   fun deleteLibrary(lib: CourseLibraryEntity) {
     viewModelScope.launch {
+      cloudSyncManager?.deleteLibraryCloud(lib)
       adminRepository.deleteLibrary(lib)
-      cloudSyncManager?.deleteLibraryCloud(lib.id)
       loadStats()
     }
   }

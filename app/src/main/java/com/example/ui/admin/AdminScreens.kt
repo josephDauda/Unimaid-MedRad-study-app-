@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -1322,7 +1323,33 @@ fun AdminAcademicSetupView(
         Text("• College of Medical Sciences -> Medical Radiography", style = MaterialTheme.typography.bodySmall)
         Spacer(modifier = Modifier.height(12.dp))
         Text("Configured Courses (${courses.size})", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-        Spacer(modifier = Modifier.height(8.dp))
+        var courseToDelete by remember { mutableStateOf<CourseEntity?>(null) }
+
+        if (courseToDelete != null) {
+          AlertDialog(
+            onDismissRequest = { courseToDelete = null },
+            title = { Text("Delete Course & Database Data?", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to delete ${courseToDelete?.code} (${courseToDelete?.title})? This will permanently delete this course and cascade delete all its linked questions, study materials, and exams directly from the Supabase cloud database and device storage.") },
+            confirmButton = {
+              Button(
+                onClick = {
+                  val c = courseToDelete
+                  courseToDelete = null
+                  if (c != null) onDeleteCourse(c)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed)
+              ) {
+                Text("Delete Course")
+              }
+            },
+            dismissButton = {
+              TextButton(onClick = { courseToDelete = null }) {
+                Text("Cancel")
+              }
+            }
+          )
+        }
+
         courses.forEach { c ->
           Row(
             modifier = Modifier
@@ -1336,7 +1363,7 @@ fun AdminAcademicSetupView(
               Text("${c.level} • ${c.semester}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(
-              onClick = { onDeleteCourse(c) },
+              onClick = { courseToDelete = c },
               modifier = Modifier.size(28.dp)
             ) {
               Icon(Icons.Default.Delete, contentDescription = "Delete course", tint = ErrorRed, modifier = Modifier.size(16.dp))
@@ -2780,61 +2807,18 @@ fun AdminLiveCloudSyncView(
         )
 
         Spacer(modifier = Modifier.height(12.dp))
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Button(
+          onClick = {
+            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(com.example.data.supabase.SupabaseMigrationScript.SQL))
+            feedbackMessage = "SQL migration script copied to clipboard! Paste and run it in Supabase SQL Editor if needed."
+          },
+          modifier = Modifier.fillMaxWidth().height(44.dp),
+          colors = ButtonDefaults.buttonColors(containerColor = ProfessionalBlue),
+          shape = RoundedCornerShape(8.dp)
         ) {
-          Button(
-            onClick = {
-              clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(com.example.data.supabase.SupabaseMigrationScript.SQL))
-              feedbackMessage = "SQL migration script copied to clipboard! Paste and run it in Supabase SQL Editor."
-            },
-            modifier = Modifier.weight(1f).height(44.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = ProfessionalBlue),
-            shape = RoundedCornerShape(8.dp)
-          ) {
-            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Copy SQL Script", style = MaterialTheme.typography.labelMedium)
-          }
-
-          OutlinedButton(
-            onClick = {
-              isTestingConnection = true
-              testConnectionResult = "Testing Supabase REST API & table permissions..."
-              adminViewModel.testCloudConnection { result ->
-                isTestingConnection = false
-                testConnectionResult = result
-              }
-            },
-            enabled = !isTestingConnection,
-            modifier = Modifier.weight(1f).height(44.dp),
-            shape = RoundedCornerShape(8.dp)
-          ) {
-            Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(if (isTestingConnection) "Testing..." else "Test Connection", style = MaterialTheme.typography.labelMedium)
-          }
-        }
-
-        testConnectionResult?.let { res ->
-          Spacer(modifier = Modifier.height(10.dp))
-          Surface(
-            color = if (res.startsWith("CONNECTED: Read & Write active")) SuccessGreen.copy(alpha = 0.12f)
-            else if (res.startsWith("READ-ONLY")) WarningAmber.copy(alpha = 0.12f)
-            else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
-            shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.fillMaxWidth()
-          ) {
-            Text(
-              text = res,
-              color = if (res.startsWith("CONNECTED: Read & Write active")) SuccessGreen
-              else if (res.startsWith("READ-ONLY")) WarningAmber
-              else MaterialTheme.colorScheme.error,
-              style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-              modifier = Modifier.padding(10.dp)
-            )
-          }
+          Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("Copy SQL Migration Script", style = MaterialTheme.typography.labelMedium)
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -3695,5 +3679,301 @@ fun AdminLiveCloudSyncView(
         }
       }
     }
+  }
+
+  // Question Picker Modal for Daily CBT Sprint (strictly filtered by sprintCourseId)
+  if (showSprintQuestionPicker) {
+    val selectedCourse = courses.find { it.id == sprintCourseId }
+    val courseQuestions = allQuestions.filter { it.courseId == sprintCourseId }
+    var tempSelectedIds by remember { mutableStateOf(sprintQuestionIds.filter { id -> courseQuestions.any { it.id == id } }.toSet()) }
+
+    AlertDialog(
+      onDismissRequest = { showSprintQuestionPicker = false },
+      title = {
+        Column {
+          Text("Choose Sprint Questions", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+          Text("${selectedCourse?.code ?: "Course"}: ${selectedCourse?.title ?: ""}", style = MaterialTheme.typography.bodySmall, color = ProfessionalBlue)
+        }
+      },
+      text = {
+        Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+          Text(
+            text = "Isolated strictly for this course (${tempSelectedIds.size} of ${courseQuestions.size} selected). These questions will be locked into the Daily CBT Sprint.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+          Spacer(modifier = Modifier.height(10.dp))
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+              onClick = { tempSelectedIds = courseQuestions.map { it.id }.toSet() },
+              modifier = Modifier.weight(1f).height(36.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("Select All", style = MaterialTheme.typography.labelSmall) }
+            OutlinedButton(
+              onClick = { tempSelectedIds = emptySet() },
+              modifier = Modifier.weight(1f).height(36.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("Clear All", style = MaterialTheme.typography.labelSmall) }
+          }
+          Spacer(modifier = Modifier.height(10.dp))
+          if (courseQuestions.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+              Text(
+                text = "No questions found for ${selectedCourse?.code ?: "this course"}.\nCreate questions under Question Bank first.",
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+          } else {
+            LazyColumn(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              items(courseQuestions) { q ->
+                val isChecked = tempSelectedIds.contains(q.id)
+                Surface(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                      tempSelectedIds = if (isChecked) tempSelectedIds - q.id else tempSelectedIds + q.id
+                    },
+                  color = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                          else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                  border = BorderStroke(1.dp, if (isChecked) MaterialTheme.colorScheme.primary else BorderSubtle),
+                  shape = RoundedCornerShape(8.dp)
+                ) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Checkbox(checked = isChecked, onCheckedChange = { checked ->
+                      tempSelectedIds = if (checked) tempSelectedIds + q.id else tempSelectedIds - q.id
+                    })
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(q.questionText, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                      Text("Ans: ${q.correctAnswer} • Marks: ${q.marks}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(onClick = {
+          sprintQuestionIds = tempSelectedIds.toList()
+          if (sprintQuestionIds.isNotEmpty()) {
+            sprintQuestionCount = sprintQuestionIds.size.toString()
+            val crs = courses.find { it.id == sprintCourseId }
+            sprintSubtitle = "${sprintQuestionIds.size} High-Yield Questions • ${crs?.title ?: crs?.code ?: "Radiography Challenge"}"
+          }
+          showSprintQuestionPicker = false
+        }) {
+          Text("Apply (${tempSelectedIds.size} Selected)")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showSprintQuestionPicker = false }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+
+  // Question Picker Modal for Center Practice Card (strictly filtered by practiceCourseId)
+  if (showPracticeQuestionPicker) {
+    val selectedCourse = courses.find { it.id == practiceCourseId }
+    val courseQuestions = allQuestions.filter { it.courseId == practiceCourseId }
+    var tempSelectedIds by remember { mutableStateOf(practiceQuestionIds.filter { id -> courseQuestions.any { it.id == id } }.toSet()) }
+
+    AlertDialog(
+      onDismissRequest = { showPracticeQuestionPicker = false },
+      title = {
+        Column {
+          Text("Choose Practice Card Questions", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+          Text("${selectedCourse?.code ?: "Course"}: ${selectedCourse?.title ?: ""}", style = MaterialTheme.typography.bodySmall, color = ProfessionalBlue)
+        }
+      },
+      text = {
+        Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+          Text(
+            text = "Isolated strictly for this course (${tempSelectedIds.size} of ${courseQuestions.size} selected).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+          Spacer(modifier = Modifier.height(10.dp))
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+              onClick = { tempSelectedIds = courseQuestions.map { it.id }.toSet() },
+              modifier = Modifier.weight(1f).height(36.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("Select All", style = MaterialTheme.typography.labelSmall) }
+            OutlinedButton(
+              onClick = { tempSelectedIds = emptySet() },
+              modifier = Modifier.weight(1f).height(36.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("Clear All", style = MaterialTheme.typography.labelSmall) }
+          }
+          Spacer(modifier = Modifier.height(10.dp))
+          if (courseQuestions.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+              Text(
+                text = "No questions found for ${selectedCourse?.code ?: "this course"}.\nCreate questions under Question Bank first.",
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+          } else {
+            LazyColumn(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              items(courseQuestions) { q ->
+                val isChecked = tempSelectedIds.contains(q.id)
+                Surface(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                      tempSelectedIds = if (isChecked) tempSelectedIds - q.id else tempSelectedIds + q.id
+                    },
+                  color = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                          else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                  border = BorderStroke(1.dp, if (isChecked) MaterialTheme.colorScheme.primary else BorderSubtle),
+                  shape = RoundedCornerShape(8.dp)
+                ) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Checkbox(checked = isChecked, onCheckedChange = { checked ->
+                      tempSelectedIds = if (checked) tempSelectedIds + q.id else tempSelectedIds - q.id
+                    })
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(q.questionText, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                      Text("Ans: ${q.correctAnswer} • Marks: ${q.marks}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(onClick = {
+          practiceQuestionIds = tempSelectedIds.toList()
+          if (practiceQuestionIds.isNotEmpty()) {
+            practiceQuestionCount = practiceQuestionIds.size.toString()
+          }
+          showPracticeQuestionPicker = false
+        }) {
+          Text("Apply (${tempSelectedIds.size} Selected)")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showPracticeQuestionPicker = false }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
+
+  // Question Picker Modal for Dashboard Mock Exam Card (strictly filtered by mockCourseId)
+  if (showMockQuestionPicker) {
+    val selectedCourse = courses.find { it.id == mockCourseId }
+    val courseQuestions = allQuestions.filter { it.courseId == mockCourseId }
+    var tempSelectedIds by remember { mutableStateOf(mockQuestionIds.filter { id -> courseQuestions.any { it.id == id } }.toSet()) }
+
+    AlertDialog(
+      onDismissRequest = { showMockQuestionPicker = false },
+      title = {
+        Column {
+          Text("Choose Mock Exam Questions", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+          Text("${selectedCourse?.code ?: "Course"}: ${selectedCourse?.title ?: ""}", style = MaterialTheme.typography.bodySmall, color = ProfessionalBlue)
+        }
+      },
+      text = {
+        Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+          Text(
+            text = "Isolated strictly for this course (${tempSelectedIds.size} of ${courseQuestions.size} selected).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+          Spacer(modifier = Modifier.height(10.dp))
+          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+              onClick = { tempSelectedIds = courseQuestions.map { it.id }.toSet() },
+              modifier = Modifier.weight(1f).height(36.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("Select All", style = MaterialTheme.typography.labelSmall) }
+            OutlinedButton(
+              onClick = { tempSelectedIds = emptySet() },
+              modifier = Modifier.weight(1f).height(36.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+            ) { Text("Clear All", style = MaterialTheme.typography.labelSmall) }
+          }
+          Spacer(modifier = Modifier.height(10.dp))
+          if (courseQuestions.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+              Text(
+                text = "No questions found for ${selectedCourse?.code ?: "this course"}.\nCreate questions under Question Bank first.",
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+          } else {
+            LazyColumn(modifier = Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              items(courseQuestions) { q ->
+                val isChecked = tempSelectedIds.contains(q.id)
+                Surface(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                      tempSelectedIds = if (isChecked) tempSelectedIds - q.id else tempSelectedIds + q.id
+                    },
+                  color = if (isChecked) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                          else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                  border = BorderStroke(1.dp, if (isChecked) MaterialTheme.colorScheme.primary else BorderSubtle),
+                  shape = RoundedCornerShape(8.dp)
+                ) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Checkbox(checked = isChecked, onCheckedChange = { checked ->
+                      tempSelectedIds = if (checked) tempSelectedIds + q.id else tempSelectedIds - q.id
+                    })
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(q.questionText, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                      Text("Ans: ${q.correctAnswer} • Marks: ${q.marks}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      confirmButton = {
+        Button(onClick = {
+          mockQuestionIds = tempSelectedIds.toList()
+          if (mockQuestionIds.isNotEmpty()) {
+            mockQuestionCount = mockQuestionIds.size.toString()
+          }
+          showMockQuestionPicker = false
+        }) {
+          Text("Apply (${tempSelectedIds.size} Selected)")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showMockQuestionPicker = false }) {
+          Text("Cancel")
+        }
+      }
+    )
   }
 }
