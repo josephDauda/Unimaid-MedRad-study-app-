@@ -176,7 +176,6 @@ fun LoginScreen(
   var passwordVisible by remember { mutableStateOf(false) }
   var showResetDialog by remember { mutableStateOf(false) }
   var showEmailPasswordFields by remember { mutableStateOf(false) }
-  var showGoogleDialog by remember { mutableStateOf(false) }
 
   // Inline Validation States
   var emailError by remember { mutableStateOf<String?>(null) }
@@ -401,7 +400,7 @@ fun LoginScreen(
 
           Spacer(modifier = Modifier.height(10.dp))
 
-          // Submit Button
+          // Direct Sign In Button
           Button(
             onClick = {
               validateAndSubmitLogin(email, password, authViewModel, { emailError = it }, { passwordError = it })
@@ -427,48 +426,14 @@ fun LoginScreen(
             }
           }
 
-          Spacer(modifier = Modifier.height(14.dp))
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
-            Text(
-              text = "  OR  ",
-              style = MaterialTheme.typography.labelSmall,
-              color = TextMuted
-            )
-            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          OutlinedButton(
-            onClick = { showGoogleDialog = true },
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(52.dp)
-              .testTag("google_signin_button"),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-              containerColor = MaterialTheme.colorScheme.surface
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.Center
-            ) {
-              GoogleEmblem(size = 20.dp)
-              Spacer(modifier = Modifier.width(10.dp))
-              Text(
-                text = "Continue with Google",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
-              )
-            }
-          }
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "✓ Direct access with your Gmail and personal password • No code confirmation needed",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+          )
         }
       }
 
@@ -499,102 +464,6 @@ fun LoginScreen(
 
       Spacer(modifier = Modifier.height(16.dp))
     }
-  }
-
-  // Google Sign-In Selection Dialog
-  if (showGoogleDialog) {
-    var googleEmailInput by remember { mutableStateOf("") }
-    var googleNameInput by remember { mutableStateOf("") }
-    var dialogError by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-      onDismissRequest = { showGoogleDialog = false },
-      title = {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          GoogleEmblem(size = 24.dp)
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            "Continue with Google",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-          )
-        }
-      },
-      text = {
-        Column {
-          Text(
-            text = "Authenticate securely with your Google / Gmail account through Supabase Auth:",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-          )
-          Spacer(modifier = Modifier.height(12.dp))
-
-          Button(
-            onClick = {
-              showGoogleDialog = false
-              authViewModel.startGoogleOAuth(context)
-            },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(10.dp)
-          ) {
-            Text("Open Google OAuth in Browser")
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
-            Text("  OR DIRECT GMAIL  ", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-            HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
-          }
-          Spacer(modifier = Modifier.height(12.dp))
-
-          OutlinedTextField(
-            value = googleEmailInput,
-            onValueChange = { googleEmailInput = it; dialogError = null },
-            label = { Text("Gmail Address") },
-            placeholder = { Text("e.g. yourname@gmail.com") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp)
-          )
-          Spacer(modifier = Modifier.height(8.dp))
-          OutlinedTextField(
-            value = googleNameInput,
-            onValueChange = { googleNameInput = it },
-            label = { Text("Your Full Name (Optional)") },
-            placeholder = { Text("e.g. Joseph Dauda") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp)
-          )
-          if (dialogError != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(dialogError!!, color = ErrorRed, style = MaterialTheme.typography.labelSmall)
-          }
-        }
-      },
-      confirmButton = {
-        Button(
-          onClick = {
-            if (googleEmailInput.isBlank() || !googleEmailInput.contains("@")) {
-              dialogError = "Please enter a valid Gmail address"
-            } else {
-              showGoogleDialog = false
-              authViewModel.loginWithGoogle(
-                email = googleEmailInput.trim(),
-                fullName = googleNameInput.trim().ifBlank { "Radiography Scholar" }
-              )
-            }
-          }
-        ) {
-          Text("Sign In")
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { showGoogleDialog = false }) {
-          Text("Cancel")
-        }
-      }
-    )
   }
 
   // Password Reset Dialog
@@ -858,21 +727,25 @@ fun RegisterScreen(
 
           Spacer(modifier = Modifier.height(8.dp))
 
-          // Phone Number
+          // Phone Number (Required to prevent duplicate accounts)
           OutlinedTextField(
             value = phoneNumber,
             onValueChange = {
               phoneNumber = it.trim()
-              phoneError = if (phoneNumber.length < 8) "Enter valid mobile number" else null
+              phoneError = if (phoneNumber.length < 8) "Enter valid mobile phone number" else null
             },
             label = { Text("Phone Number") },
-            placeholder = { Text("+234 800 000 0000", color = TextMuted) },
+            placeholder = { Text("e.g. 08012345678", color = TextMuted) },
             leadingIcon = {
               Icon(Icons.Outlined.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             },
             isError = phoneError != null,
             supportingText = {
-              if (phoneError != null) Text(phoneError!!, color = ErrorRed, style = MaterialTheme.typography.labelSmall)
+              if (phoneError != null) {
+                Text(phoneError!!, color = ErrorRed, style = MaterialTheme.typography.labelSmall)
+              } else {
+                Text("Associated with your Gmail to prevent duplicate accounts", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              }
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
@@ -883,23 +756,20 @@ fun RegisterScreen(
 
           Spacer(modifier = Modifier.height(4.dp))
 
-          // Password
+          // Personal Password (Required)
           OutlinedTextField(
             value = password,
             onValueChange = {
               password = it
-              passwordError = when {
-                password.length < 6 -> "Minimum 6 characters required"
-                !password.any { ch -> ch.isDigit() } -> "Must include at least 1 number"
-                else -> null
-              }
+              passwordError = if (password.length < 6) "Personal password must be at least 6 characters" else null
               if (confirmPassword.isNotEmpty() && confirmPassword != password) {
                 confirmPasswordError = "Passwords do not match"
               } else {
                 confirmPasswordError = null
               }
             },
-            label = { Text("Password") },
+            label = { Text("Personal Password") },
+            placeholder = { Text("At least 6 characters", color = TextMuted) },
             leadingIcon = {
               Icon(Icons.Outlined.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             },
@@ -925,14 +795,14 @@ fun RegisterScreen(
 
           Spacer(modifier = Modifier.height(4.dp))
 
-          // Confirm Password
+          // Confirm Personal Password
           OutlinedTextField(
             value = confirmPassword,
             onValueChange = {
               confirmPassword = it
               confirmPasswordError = if (confirmPassword != password) "Passwords do not match" else null
             },
-            label = { Text("Confirm Password") },
+            label = { Text("Confirm Personal Password") },
             leadingIcon = {
               Icon(Icons.Outlined.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             },
@@ -962,20 +832,20 @@ fun RegisterScreen(
           Button(
             onClick = {
               var valid = true
-              if (fullName.trim().length < 3) {
+              if (fullName.trim().length < 2) {
                 nameError = "Enter your full name"
                 valid = false
               }
-              if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-                emailError = "Valid email required"
+              if (email.trim().isEmpty() || !email.contains("@")) {
+                emailError = "Valid Gmail / institutional email required"
                 valid = false
               }
-              if (phoneNumber.length < 8) {
-                phoneError = "Valid phone number required"
+              if (phoneNumber.trim().length < 8) {
+                phoneError = "Phone number is required"
                 valid = false
               }
-              if (password.length < 6 || !password.any { it.isDigit() }) {
-                passwordError = "Password must have 6+ chars and 1+ number"
+              if (password.length < 6) {
+                passwordError = "Personal password must be at least 6 characters"
                 valid = false
               }
               if (confirmPassword != password) {
@@ -988,7 +858,7 @@ fun RegisterScreen(
                   fullName = fullName.trim(),
                   email = email.trim(),
                   phoneNumber = phoneNumber.trim(),
-                  password = password,
+                  password = password.trim(),
                   university = "University of Maiduguri",
                   faculty = "College of Medical Sciences",
                   department = department,
@@ -1012,11 +882,20 @@ fun RegisterScreen(
               CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
             } else {
               Text(
-                text = "Complete Registration",
+                text = "Create Account & Start Learning",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
               )
             }
           }
+
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = "✓ Directly deposited into database • No Google link or confirmation code required",
+            style = MaterialTheme.typography.labelSmall,
+            color = SuccessGreen,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+          )
         }
       }
 

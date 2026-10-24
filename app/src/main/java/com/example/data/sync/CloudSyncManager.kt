@@ -91,7 +91,11 @@ data class MockCardConfig(
   val examTitle: String = "ANA 201 Mock Exam",
   val questionCount: Int = 0,
   val durationMinutes: Int = 30,
-  val questionIds: List<Long> = emptyList()
+  val questionIds: List<Long> = emptyList(),
+  val revealMode: String = "INSTANT", // "INSTANT" or "DEADLINE"
+  val deadlineString: String = "",
+  val deadlineTimestamp: Long = 0L,
+  val sessionId: String = "Session 1"
 )
 
 data class StudentFeedbackItem(
@@ -194,7 +198,11 @@ class CloudSyncManager(
       examTitle = prefs.getString("mock_card_exam_title", "ANA 201 Mock Exam") ?: "ANA 201 Mock Exam",
       questionCount = prefs.getInt("mock_card_question_count", 0),
       durationMinutes = prefs.getInt("mock_card_duration_minutes", 30),
-      questionIds = prefs.getString("mock_card_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
+      questionIds = prefs.getString("mock_card_question_ids", "")?.split(",")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList(),
+      revealMode = prefs.getString("mock_card_reveal_mode", "INSTANT") ?: "INSTANT",
+      deadlineString = prefs.getString("mock_card_deadline_string", "") ?: "",
+      deadlineTimestamp = prefs.getLong("mock_card_deadline_timestamp", 0L),
+      sessionId = prefs.getString("mock_card_session_id", "Session 1") ?: "Session 1"
     )
   )
   val mockCardConfig: StateFlow<MockCardConfig> = _mockCardConfig.asStateFlow()
@@ -701,6 +709,23 @@ class CloudSyncManager(
         _mockCardConfig.value = _mockCardConfig.value.copy(questionIds = ids)
         prefs.edit().putString("mock_card_question_ids", value).apply()
       }
+      "mock_card_reveal_mode" -> {
+        _mockCardConfig.value = _mockCardConfig.value.copy(revealMode = value)
+        prefs.edit().putString("mock_card_reveal_mode", value).apply()
+      }
+      "mock_card_deadline_string" -> {
+        _mockCardConfig.value = _mockCardConfig.value.copy(deadlineString = value)
+        prefs.edit().putString("mock_card_deadline_string", value).apply()
+      }
+      "mock_card_deadline_timestamp" -> {
+        val ts = value.toLongOrNull() ?: 0L
+        _mockCardConfig.value = _mockCardConfig.value.copy(deadlineTimestamp = ts)
+        prefs.edit().putLong("mock_card_deadline_timestamp", ts).apply()
+      }
+      "mock_card_session_id" -> {
+        _mockCardConfig.value = _mockCardConfig.value.copy(sessionId = value)
+        prefs.edit().putString("mock_card_session_id", value).apply()
+      }
       "about_description" -> {
         _aboutAppContent.value = _aboutAppContent.value.copy(description = value)
         prefs.edit().putString("about_desc", value).apply()
@@ -934,19 +959,37 @@ class CloudSyncManager(
         val totalQ = record.optInt("total_questions", localExam?.totalQuestions ?: 15)
         val durationSec = record.optInt("duration_seconds", record.optInt("time_spent_seconds", 0))
 
+        val resolvedCourse = localCourse ?: (localExam?.courseId?.let { database.academicDao().getCourseById(it) })
+        val resolvedCourseTitle = resolvedCourse?.let { "${it.code} - ${it.title}" }
+          ?: record.optString("course_title").ifBlank { "Medical Radiography" }
+
+        val answersJsonStr = if (existing != null && existing.answersJson.isNotBlank() && existing.answersJson != "{}") {
+          existing.answersJson
+        } else {
+          val metaObj = JSONObject().apply {
+            put("session_id", record.optString("session_id", "Session 1"))
+            if (localUser != null) {
+              put("student_name", localUser.fullName)
+              put("student_email", localUser.email)
+              put("student_level", localUser.level)
+            }
+          }
+          JSONObject().apply { put("_meta", metaObj) }.toString()
+        }
+
         val attemptEntity = ExamAttemptEntity(
           id = if (localId > 0) localId else 0L,
           userId = localUserId,
           examId = if (localExamId > 0) localExamId else null,
-          courseTitle = localCourse?.title ?: "Medical Radiography",
-          examTitle = localExam?.title ?: "CBT Examination",
+          courseTitle = resolvedCourseTitle,
+          examTitle = localExam?.title ?: record.optString("exam_title").ifBlank { "CBT Examination" },
           score = score,
           totalQuestions = totalQ,
           correctAnswers = score,
           incorrectAnswers = maxOf(0, totalQ - score),
           unansweredQuestions = 0,
           timeSpentSeconds = durationSec,
-          answersJson = existing?.answersJson ?: "{}",
+          answersJson = answersJsonStr,
           timestamp = parseTimestamp(record.optString("created_at")),
           remoteId = remoteUuid,
           remoteExamId = examRemoteId,
@@ -2326,6 +2369,10 @@ class CloudSyncManager(
         .putInt("mock_card_question_count", config.questionCount)
         .putInt("mock_card_duration_minutes", config.durationMinutes)
         .putString("mock_card_question_ids", config.questionIds.joinToString(","))
+        .putString("mock_card_reveal_mode", config.revealMode)
+        .putString("mock_card_deadline_string", config.deadlineString)
+        .putLong("mock_card_deadline_timestamp", config.deadlineTimestamp)
+        .putString("mock_card_session_id", config.sessionId)
         .apply()
 
       val array = JSONArray().apply {
@@ -2338,12 +2385,57 @@ class CloudSyncManager(
         put(JSONObject().put("key", "mock_card_question_count").put("value", config.questionCount.toString()))
         put(JSONObject().put("key", "mock_card_duration_minutes").put("value", config.durationMinutes.toString()))
         put(JSONObject().put("key", "mock_card_question_ids").put("value", config.questionIds.joinToString(",")))
+        put(JSONObject().put("key", "mock_card_reveal_mode").put("value", config.revealMode))
+        put(JSONObject().put("key", "mock_card_deadline_string").put("value", config.deadlineString))
+        put(JSONObject().put("key", "mock_card_deadline_timestamp").put("value", config.deadlineTimestamp.toString()))
+        put(JSONObject().put("key", "mock_card_session_id").put("value", config.sessionId))
       }
       val result = supabaseClient.restPost("app_config", array.toString(), upsert = true)
       realtimeManager?.dispatchRealtimeEvent("app_config", "UPDATE", JSONObject().put("mock_card_is_active", config.isConfigured))
 
       if (result.isSuccess) Result.success(true) else Result.failure(result.exceptionOrNull() ?: Exception("Failed to update mock card"))
     } catch (e: Exception) {
+      Result.failure(e)
+    }
+  }
+
+  suspend fun broadcastProfile(user: UserEntity): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val email = user.email.trim().lowercase()
+      val existingRes = supabaseClient.restGet("profiles?email=eq.$email&limit=1")
+      val json = existingRes.getOrNull() ?: "[]"
+      val arr = JSONArray(json)
+      val existingId = if (arr.length() > 0) arr.getJSONObject(0).optString("id") else null
+      val profileId = existingId ?: FlexibleIdHelper.toUuidString(user.id, "user")
+
+      val payload = JSONObject().apply {
+        put("id", profileId)
+        put("email", email)
+        put("full_name", user.fullName.trim())
+        put("matric_number", user.phoneNumber.trim())
+        put("level", user.level)
+        put("department", user.department)
+        put("faculty", user.faculty)
+        put("app_role", if (user.role == "ADMIN") "admin" else "student")
+        put("is_active", user.isActive)
+      }
+
+      val res = supabaseClient.restPost("profiles", payload.toString(), upsert = true)
+      realtimeManager?.dispatchRealtimeEvent("profiles", if (existingId != null) "UPDATE" else "INSERT", payload)
+      Result.success(res.isSuccess)
+    } catch (e: Exception) {
+      Log.e(tag, "broadcastProfile error: ${e.message}", e)
+      Result.failure(e)
+    }
+  }
+
+  suspend fun deleteProfileCloud(email: String): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+      val res = supabaseClient.restDelete("profiles?email=eq.${email.trim().lowercase()}")
+      realtimeManager?.dispatchRealtimeEvent("profiles", "DELETE", JSONObject().put("email", email))
+      Result.success(res.isSuccess)
+    } catch (e: Exception) {
+      Log.e(tag, "deleteProfileCloud error: ${e.message}", e)
       Result.failure(e)
     }
   }

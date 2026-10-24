@@ -146,7 +146,7 @@ fun MedradNavHost(
       container.notificationRepository
     )
   }
-  val cbtViewModel = remember { CbtViewModel(container.cbtRepository, container.academicRepository) }
+  val cbtViewModel = remember { CbtViewModel(container.cbtRepository, container.academicRepository, container.cloudSyncManager) }
   val resultsViewModel = remember { ResultsViewModel(container.cbtRepository, container.academicRepository) }
   val subscriptionViewModel = remember { SubscriptionViewModel(container.subscriptionRepository, container.authRepository) }
   val adminViewModel = remember { AdminViewModel(container.adminRepository, container.academicRepository, container.cloudSyncManager) }

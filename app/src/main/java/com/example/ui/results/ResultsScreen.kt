@@ -21,9 +21,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AssignmentTurnedIn
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Timer
@@ -118,6 +120,20 @@ fun ResultsScreen(
         JSONObject()
       }
 
+      val meta = answersJson.optJSONObject("_meta")
+      val isMockExam = meta?.optBoolean("is_mock_exam", false) ?: (att.examTitle.contains("Mock", ignoreCase = true) || att.examTitle.contains("CBT", ignoreCase = true))
+      val revealMode = meta?.optString("reveal_mode", "INSTANT") ?: "INSTANT"
+      val deadlineTimestamp = meta?.optLong("deadline_timestamp", 0L) ?: 0L
+      val deadlineString = meta?.optString("deadline_string", "") ?: ""
+      val studentName = meta?.optString("student_name", "") ?: ""
+      val sessionId = meta?.optString("session_id", "Session 1") ?: "Session 1"
+
+      val isDeadlinePassed = deadlineTimestamp > 0L && System.currentTimeMillis() >= deadlineTimestamp
+      val isScoresConfidential = isMockExam && (revealMode.equals("DEADLINE", ignoreCase = true)) && !isDeadlinePassed
+
+      val minutesUsed = att.timeSpentSeconds / 60
+      val secondsUsed = att.timeSpentSeconds % 60
+
       LazyColumn(
         modifier = Modifier
           .fillMaxSize()
@@ -125,150 +141,261 @@ fun ResultsScreen(
           .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
       ) {
-        item {
-          Spacer(modifier = Modifier.height(8.dp))
-          // 1. Overall Score Hero Card
-          Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-          ) {
-            Column(
-              modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-              horizontalAlignment = Alignment.CenterHorizontally
+        if (isScoresConfidential) {
+          // Official Confidential Submission Receipt for Withheld Mock CBT
+          item {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(16.dp),
+              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+              elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             ) {
-              Text(
-                text = att.examTitle,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-              )
-              Text(
-                text = att.courseTitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-              )
-
-              Spacer(modifier = Modifier.height(16.dp))
-
-              // Circular Percentage Badge
-              val scoreColor = when {
-                att.score >= 70 -> SuccessGreen
-                att.score >= 50 -> WarningAmber
-                else -> ErrorRed
-              }
-
-              Box(
+              Column(
                 modifier = Modifier
-                  .size(110.dp)
-                  .clip(CircleShape)
-                  .background(scoreColor.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
+                  .fillMaxWidth()
+                  .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
               ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                  Text(
-                    text = "${att.score}%",
-                    style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                    color = scoreColor
-                  )
-                  Text(
-                    text = if (att.score >= 70) "DISTINCTION" else if (att.score >= 50) "PASSED" else "NEEDS REVIEW",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
-                    color = scoreColor
+                Box(
+                  modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(SuccessGreen.copy(alpha = 0.12f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    Icons.Default.AssignmentTurnedIn,
+                    contentDescription = null,
+                    tint = SuccessGreen,
+                    modifier = Modifier.size(40.dp)
                   )
                 }
-              }
 
-              Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-              Text(
-                text = "${att.correctAnswers} / ${att.totalQuestions} Correct",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface
-              )
+                Text(
+                  text = "Mock CBT Submission Confirmed",
+                  style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                  text = "Official Departmental Examination Receipt",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-              Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-              // Breakdown Row
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround
-              ) {
-                StatItem("Correct", "${att.correctAnswers}", SuccessGreen)
-                StatItem("Incorrect", "${att.incorrectAnswers}", ErrorRed)
-                StatItem("Unanswered", "${att.unansweredQuestions}", Color(0xFF64748B))
-                val minutesUsed = att.timeSpentSeconds / 60
-                val secondsUsed = att.timeSpentSeconds % 60
-                StatItem("Time", "%02d:%02d".format(minutesUsed, secondsUsed), ProfessionalBlue)
+                Surface(
+                  modifier = Modifier.fillMaxWidth(),
+                  shape = RoundedCornerShape(12.dp),
+                  color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                  border = BorderStroke(1.dp, BorderSubtle)
+                ) {
+                  Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReceiptRow("Candidate", studentName.ifBlank { "Registered Student" })
+                    ReceiptRow("Course", att.courseTitle)
+                    ReceiptRow("Examination", att.examTitle)
+                    ReceiptRow("Session Batch", sessionId)
+                    ReceiptRow("Time Spent", "%02d:%02d".format(minutesUsed, secondsUsed))
+                    ReceiptRow("Status", "Securely Logged on Database")
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Surface(
+                  modifier = Modifier.fillMaxWidth(),
+                  shape = RoundedCornerShape(12.dp),
+                  color = WarningAmber.copy(alpha = 0.12f),
+                  border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.4f))
+                ) {
+                  Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+                    Icon(
+                      Icons.Default.Lock,
+                      contentDescription = null,
+                      tint = Color(0xFFB45309),
+                      modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                      Text(
+                        text = "Score & Corrections Withheld",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = Color(0xFFB45309)
+                      )
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Text(
+                        text = "In accordance with examination policy, individual scores are held confidential until the submission deadline${if (deadlineString.isNotBlank()) " ($deadlineString)" else ""}. Your answers are recorded in the central database and will be compiled into the official departmental PDF score sheet for the admin.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                      )
+                    }
+                  }
+                }
               }
             }
           }
-        }
 
-        // Action Buttons
-        item {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-          ) {
-            OutlinedButton(
-              onClick = onPracticeAgain,
-              modifier = Modifier.weight(1f).height(48.dp),
-              shape = RoundedCornerShape(10.dp)
-            ) {
-              Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-              Spacer(modifier = Modifier.width(6.dp))
-              Text("Practice Again")
-            }
-
+          item {
             Button(
               onClick = onNavigateToDashboard,
-              modifier = Modifier.weight(1f).height(48.dp),
+              modifier = Modifier.fillMaxWidth().height(48.dp),
               colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
               ),
               shape = RoundedCornerShape(10.dp)
             ) {
-              Text("Dashboard")
+              Text("Return to Dashboard")
             }
           }
-        }
+        } else {
+          // Standard Score Hero Card for Instant Reveal / Practice / Post-Deadline
+          item {
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+              modifier = Modifier.fillMaxWidth(),
+              shape = RoundedCornerShape(16.dp),
+              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+              elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                Text(
+                  text = att.examTitle,
+                  style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                  text = att.courseTitle,
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-        // Review Header
-        item {
-          Text(
-            text = "Detailed Question Review & Explanations",
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(top = 8.dp)
-          )
-        }
+                Spacer(modifier = Modifier.height(16.dp))
 
-        // List of question reviews
-        itemsIndexed(questions) { index, question ->
-          val answerInfo = if (answersJson.has(question.id.toString())) {
-            answersJson.getJSONObject(question.id.toString())
-          } else {
-            null
+                // Circular Percentage Badge
+                val scoreColor = when {
+                  att.score >= 70 -> SuccessGreen
+                  att.score >= 50 -> WarningAmber
+                  else -> ErrorRed
+                }
+
+                Box(
+                  modifier = Modifier
+                    .size(110.dp)
+                    .clip(CircleShape)
+                    .background(scoreColor.copy(alpha = 0.12f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                      text = "${att.score}%",
+                      style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                      color = scoreColor
+                    )
+                    Text(
+                      text = if (att.score >= 70) "DISTINCTION" else if (att.score >= 50) "PASSED" else "NEEDS REVIEW",
+                      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                      color = scoreColor
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                  text = "${att.correctAnswers} / ${att.totalQuestions} Correct",
+                  style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Breakdown Row
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                  StatItem("Correct", "${att.correctAnswers}", SuccessGreen)
+                  StatItem("Incorrect", "${att.incorrectAnswers}", ErrorRed)
+                  StatItem("Unanswered", "${att.unansweredQuestions}", Color(0xFF64748B))
+                  StatItem("Time", "%02d:%02d".format(minutesUsed, secondsUsed), ProfessionalBlue)
+                }
+              }
+            }
           }
 
-          val chosen = answerInfo?.optString("chosen", "") ?: ""
-          val isCorrect = answerInfo?.optBoolean("isCorrect", false) ?: false
+          // Action Buttons
+          item {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+              OutlinedButton(
+                onClick = onPracticeAgain,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(10.dp)
+              ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Practice Again")
+              }
 
-          QuestionReviewCard(
-            questionNumber = index + 1,
-            question = question,
-            chosenOption = chosen,
-            isCorrect = isCorrect
-          )
-        }
+              Button(
+                onClick = onNavigateToDashboard,
+                modifier = Modifier.weight(1f).height(48.dp),
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = MaterialTheme.colorScheme.primary,
+                  contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                shape = RoundedCornerShape(10.dp)
+              ) {
+                Text("Dashboard")
+              }
+            }
+          }
 
-        item {
-          Spacer(modifier = Modifier.height(24.dp))
+          // Review Header
+          item {
+            Text(
+              text = "Detailed Question Review & Explanations",
+              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.onBackground,
+              modifier = Modifier.padding(top = 8.dp)
+            )
+          }
+
+          // List of question reviews
+          itemsIndexed(questions) { index, question ->
+            val answerInfo = if (answersJson.has(question.id.toString())) {
+              answersJson.getJSONObject(question.id.toString())
+            } else {
+              null
+            }
+
+            val chosen = answerInfo?.optString("chosen", "") ?: ""
+            val isCorrect = answerInfo?.optBoolean("isCorrect", false) ?: false
+
+            QuestionReviewCard(
+              questionNumber = index + 1,
+              question = question,
+              chosenOption = chosen,
+              isCorrect = isCorrect
+            )
+          }
+
+          item {
+            Spacer(modifier = Modifier.height(24.dp))
+          }
         }
       }
     }
@@ -403,5 +530,25 @@ fun QuestionReviewCard(
         }
       }
     }
+  }
+}
+
+@Composable
+fun ReceiptRow(label: String, value: String) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Text(
+      text = label,
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    Text(
+      text = value,
+      style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+      color = MaterialTheme.colorScheme.onSurface
+    )
   }
 }

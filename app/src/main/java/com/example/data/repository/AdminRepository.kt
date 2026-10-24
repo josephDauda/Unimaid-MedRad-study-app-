@@ -174,7 +174,8 @@ class AdminRepository(private val database: AppDatabase) {
   ): Result<Long> = withContext(Dispatchers.IO) {
     try {
       // Backend security rule: Only Primary Admin can add secondary admins
-      if (creator.role != "ADMIN" || creator.adminRole != "PRIMARY") {
+      val isPrimary = creator.role == "ADMIN" && (creator.adminRole.equals("PRIMARY", ignoreCase = true) || creator.email.equals("admin@medrad.edu.ng", ignoreCase = true) || creator.adminRole.isBlank())
+      if (!isPrimary) {
         return@withContext Result.failure(SecurityException("Unauthorized: Only Primary Admin can create secondary admin accounts."))
       }
 
@@ -190,7 +191,7 @@ class AdminRepository(private val database: AppDatabase) {
         passwordHash = com.example.data.util.PasswordSecurity.hashPassword(rawPassword),
         role = "ADMIN",
         adminRole = "SECONDARY",
-        permissions = permissions.ifBlank { "materials,questions,announcements,libraries" },
+        permissions = permissions.ifBlank { "materials,questions,announcements,libraries,exams" },
         assignedCourses = assignedCourses.trim(),
         isActive = true,
         university = creator.university,
@@ -215,7 +216,8 @@ class AdminRepository(private val database: AppDatabase) {
     isActive: Boolean
   ): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      if (modifier.role != "ADMIN" || modifier.adminRole != "PRIMARY") {
+      val isPrimary = modifier.role == "ADMIN" && (modifier.adminRole.equals("PRIMARY", ignoreCase = true) || modifier.email.equals("admin@medrad.edu.ng", ignoreCase = true) || modifier.adminRole.isBlank())
+      if (!isPrimary) {
         return@withContext Result.failure(SecurityException("Unauthorized: Only Primary Admin can modify admin permissions."))
       }
 
@@ -244,7 +246,8 @@ class AdminRepository(private val database: AppDatabase) {
     adminId: Long
   ): Result<Boolean> = withContext(Dispatchers.IO) {
     try {
-      if (remover.role != "ADMIN" || remover.adminRole != "PRIMARY") {
+      val isPrimary = remover.role == "ADMIN" && (remover.adminRole.equals("PRIMARY", ignoreCase = true) || remover.email.equals("admin@medrad.edu.ng", ignoreCase = true) || remover.adminRole.isBlank())
+      if (!isPrimary) {
         return@withContext Result.failure(SecurityException("Unauthorized: Only Primary Admin can remove admins."))
       }
 
@@ -255,7 +258,7 @@ class AdminRepository(private val database: AppDatabase) {
       val target = userDao.getUserById(adminId)
         ?: return@withContext Result.failure(IllegalArgumentException("Admin not found."))
 
-      if (target.adminRole == "PRIMARY") {
+      if (target.adminRole == "PRIMARY" || target.email.equals("admin@medrad.edu.ng", ignoreCase = true)) {
         return@withContext Result.failure(IllegalStateException("Cannot delete a Primary Admin account."))
       }
 
@@ -282,5 +285,6 @@ class AdminRepository(private val database: AppDatabase) {
 
   fun getAllStudents(): Flow<List<UserEntity>> = userDao.getAllStudents()
   fun getAllSubscriptions(): Flow<List<SubscriptionEntity>> = subscriptionDao.getAllSubscriptions()
+  suspend fun getAdminById(id: Long): UserEntity? = userDao.getUserById(id)
   fun getAllExamAttempts(): Flow<List<ExamAttemptEntity>> = examDao.getAllAttempts()
 }

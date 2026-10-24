@@ -38,11 +38,20 @@ import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.style.TextAlign
+import com.example.data.util.ScoreSheetPdfGenerator
+import org.json.JSONObject
+import android.widget.Toast
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -929,7 +938,7 @@ fun AdminPushNotificationsView(
 
 /**
  * 3. Score & Results Export View:
- * Admin views all students' test scores and exports/prints them (shareable transcript/grade sheet).
+ * Admin views all students' test scores and exports official departmental score sheets as PDF.
  */
 @Composable
 fun AdminScoreExportView(
@@ -937,53 +946,156 @@ fun AdminScoreExportView(
 ) {
   val attempts by adminViewModel.allAttempts.collectAsState()
   val courses by adminViewModel.allCourses.collectAsState()
+  val students by adminViewModel.allStudents.collectAsState()
+  val isSyncing by adminViewModel.isSyncing.collectAsState()
   val context = LocalContext.current
-  val clipboard = LocalClipboardManager.current
+
+  LaunchedEffect(Unit) {
+    adminViewModel.syncAttemptsFromCloud()
+  }
+
+  val studentMap = remember(students) { students.associateBy { it.id } }
 
   var selectedCourseFilter by remember { mutableStateOf("All Courses") }
   var courseFilterExpanded by remember { mutableStateOf(false) }
 
-  var exportedText by remember { mutableStateOf<String?>(null) }
+  var selectedSessionFilter by remember { mutableStateOf("All Sessions") }
+  var sessionFilterExpanded by remember { mutableStateOf(false) }
 
   val courseNames = listOf("All Courses") + courses.map { it.code }
 
-  val filteredAttempts = if (selectedCourseFilter == "All Courses") {
-    attempts
-  } else {
-    attempts.filter { it.courseTitle.contains(selectedCourseFilter, ignoreCase = true) }
+  val sessionNames = remember(attempts) {
+    val found = attempts.mapNotNull { att ->
+      try {
+        if (att.answersJson.startsWith("{")) {
+          JSONObject(att.answersJson).optJSONObject("_meta")?.optString("session_id")
+        } else null
+      } catch (_: Exception) { null }
+    }.filter { it.isNotBlank() }.distinct()
+    listOf("All Sessions") + if (found.isEmpty()) listOf("Session 1") else found
   }
+
+  val selectedCourse = courses.find { it.code.equals(selectedCourseFilter, ignoreCase = true) }
+  val filteredAttempts = attempts.filter { att ->
+    val matchCourse = (selectedCourseFilter == "All Courses") ||
+                      att.courseTitle.contains(selectedCourseFilter, ignoreCase = true) ||
+                      att.examTitle.contains(selectedCourseFilter, ignoreCase = true) ||
+                      (selectedCourse != null && (att.courseTitle.contains(selectedCourse.title, ignoreCase = true) || att.examTitle.contains(selectedCourse.code, ignoreCase = true)))
+    val session = try {
+      if (att.answersJson.startsWith("{")) {
+        JSONObject(att.answersJson).optJSONObject("_meta")?.optString("session_id", "Session 1") ?: "Session 1"
+      } else "Session 1"
+    } catch (_: Exception) { "Session 1" }
+    val matchSession = (selectedSessionFilter == "All Sessions") || session.equals(selectedSessionFilter, ignoreCase = true)
+    matchCourse && matchSession
+  }
+
+  val totalCandidates = filteredAttempts.size
+  val passedCount = filteredAttempts.count {
+    val total = if (it.totalQuestions > 0) it.totalQuestions else 15
+    val raw = if (it.score > total) (it.score * total) / 100 else it.score
+    val pct = if (total > 0) (raw * 100) / total else 0
+    pct >= 50
+  }
+  val passRate = if (totalCandidates > 0) (passedCount * 100) / totalCandidates else 0
 
   Column(
     modifier = Modifier
       .fillMaxSize()
       .padding(vertical = 12.dp)
   ) {
-    Text(
-      text = "Student Examination Scores & Grade Export",
-      style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-      color = MaterialTheme.colorScheme.onSurface
-    )
-    Text(
-      text = "View student CBT performance across departmental examinations and export printable grade transcripts.",
-      style = MaterialTheme.typography.bodySmall,
-      color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-
-    Spacer(modifier = Modifier.height(14.dp))
-
-    // Filter and Action Bar
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
+      Column(modifier = Modifier.weight(1f)) {
+        Text(
+          text = "Student Examination Scores & Grade Sheet",
+          style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+          color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+          text = "Marked automatically against admin answer keys. Isolates records per course and session.",
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
+      IconButton(
+        onClick = {
+          Toast.makeText(context, "Syncing exam attempts from cloud...", Toast.LENGTH_SHORT).show()
+          adminViewModel.syncAttemptsFromCloud {
+            Toast.makeText(context, "Cloud sync complete.", Toast.LENGTH_SHORT).show()
+          }
+        }
+      ) {
+        if (isSyncing) {
+          CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+          Icon(Icons.Default.Refresh, contentDescription = "Sync Cloud Submissions", tint = ProfessionalBlue)
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // Summary Statistics Cards
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      Surface(
+        modifier = Modifier.weight(1f),
+        shape = RoundedCornerShape(10.dp),
+        color = ProfessionalBlue.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, ProfessionalBlue.copy(alpha = 0.3f))
+      ) {
+        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+          Text("SUBMISSIONS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp), color = ProfessionalBlue)
+          Text("$totalCandidates", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = ProfessionalBlue)
+        }
+      }
+
+      Surface(
+        modifier = Modifier.weight(1f),
+        shape = RoundedCornerShape(10.dp),
+        color = SuccessGreen.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.3f))
+      ) {
+        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+          Text("PASSED", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp), color = SuccessGreen)
+          Text("$passedCount", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = SuccessGreen)
+        }
+      }
+
+      Surface(
+        modifier = Modifier.weight(1f),
+        shape = RoundedCornerShape(10.dp),
+        color = WarningAmber.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, WarningAmber.copy(alpha = 0.3f))
+      ) {
+        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+          Text("PASS RATE", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp), color = Color(0xFFB45309))
+          Text("$passRate%", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = Color(0xFFB45309))
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // Filter Controls: Course and Session
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
       // Course Filter Dropdown
-      Box {
+      Box(modifier = Modifier.weight(1f)) {
         OutlinedButton(
           onClick = { courseFilterExpanded = true },
+          modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(8.dp)
         ) {
-          Text("Course: $selectedCourseFilter")
+          Text(selectedCourseFilter, maxLines = 1)
         }
         androidx.compose.material3.DropdownMenu(
           expanded = courseFilterExpanded,
@@ -1001,55 +1113,194 @@ fun AdminScoreExportView(
         }
       }
 
-      // Export / Share Button
+      // Session Filter Dropdown
+      Box(modifier = Modifier.weight(1f)) {
+        OutlinedButton(
+          onClick = { sessionFilterExpanded = true },
+          modifier = Modifier.fillMaxWidth(),
+          shape = RoundedCornerShape(8.dp)
+        ) {
+          Text(selectedSessionFilter, maxLines = 1)
+        }
+        androidx.compose.material3.DropdownMenu(
+          expanded = sessionFilterExpanded,
+          onDismissRequest = { sessionFilterExpanded = false }
+        ) {
+          sessionNames.forEach { name ->
+            DropdownMenuItem(
+              text = { Text(name) },
+              onClick = {
+                selectedSessionFilter = name
+                sessionFilterExpanded = false
+              }
+            )
+          }
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    // Primary Action: 1-Click PDF Score Sheet Download
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
       Button(
         onClick = {
+          val selectedCourseObj = courses.find { it.code.equals(selectedCourseFilter, ignoreCase = true) }
+          val courseCode = selectedCourseObj?.code ?: if (selectedCourseFilter != "All Courses") selectedCourseFilter else "ANA 201"
+          val courseTitle = selectedCourseObj?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
+          val sessionName = if (selectedSessionFilter != "All Sessions") selectedSessionFilter else "General Departmental Session"
+
+          val feedbackMsg = if (filteredAttempts.isNotEmpty()) {
+            "Generating Official CBT Score Sheet for $courseCode..."
+          } else {
+            "Generating Departmental Candidate Roster for $courseCode..."
+          }
+          Toast.makeText(context, feedbackMsg, Toast.LENGTH_SHORT).show()
+
+          val pdfResult = ScoreSheetPdfGenerator.generateMockScoreSheetPdf(
+            context = context,
+            courseCode = courseCode,
+            courseTitle = courseTitle,
+            sessionName = sessionName,
+            deadlineStr = "",
+            attempts = filteredAttempts,
+            studentsMap = studentMap
+          )
+
+          pdfResult.fold(
+            onSuccess = { pdfFile ->
+              ScoreSheetPdfGenerator.openOrSharePdf(context, pdfFile, "$courseCode Departmental CBT Score Sheet")
+            },
+            onFailure = { error ->
+              Toast.makeText(context, "Failed to generate PDF: ${error.message}", Toast.LENGTH_LONG).show()
+            }
+          )
+        },
+        modifier = Modifier.weight(1.3f).height(46.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
+        shape = RoundedCornerShape(8.dp)
+      ) {
+        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Download PDF Score Sheet", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+      }
+
+      OutlinedButton(
+        onClick = {
           adminViewModel.exportStudentScores(if (selectedCourseFilter == "All Courses") null else selectedCourseFilter) { report ->
-            exportedText = report
-            // Also trigger Android system share sheet
             val sendIntent = Intent().apply {
               action = Intent.ACTION_SEND
               putExtra(Intent.EXTRA_TEXT, report)
               putExtra(Intent.EXTRA_SUBJECT, "MedRad Department CBT Examination Results")
               type = "text/plain"
             }
-            context.startActivity(Intent.createChooser(sendIntent, "Export Examination Results"))
+            context.startActivity(Intent.createChooser(sendIntent, "Share Text Summary"))
           }
         },
-        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+        modifier = Modifier.weight(0.7f).height(46.dp),
         shape = RoundedCornerShape(8.dp)
       ) {
         Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-        Spacer(modifier = Modifier.width(6.dp))
-        Text("Export / Share")
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("Share", style = MaterialTheme.typography.labelMedium)
       }
     }
 
-    Spacer(modifier = Modifier.height(12.dp))
-
-    Text(
-      text = "Total Attempts: ${filteredAttempts.size}",
-      style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-      color = ProfessionalBlue
-    )
-
-    Spacer(modifier = Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(14.dp))
 
     if (filteredAttempts.isEmpty()) {
       Box(
-        modifier = Modifier.fillMaxSize().padding(40.dp),
+        modifier = Modifier.fillMaxSize().padding(24.dp),
         contentAlignment = Alignment.Center
       ) {
-        Text("No exam attempts recorded under $selectedCourseFilter yet.", color = TextMuted)
+        Column(
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Text(
+            text = "No online test submissions recorded under $selectedCourseFilter ($selectedSessionFilter) yet.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center
+          )
+          Text(
+            text = "You can click 'Download PDF Score Sheet' above to generate the official candidate examination roster, or pull submitted results from the cloud below.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted,
+            textAlign = TextAlign.Center
+          )
+          Spacer(modifier = Modifier.height(4.dp))
+          Button(
+            onClick = {
+              Toast.makeText(context, "Syncing attempts from cloud...", Toast.LENGTH_SHORT).show()
+              adminViewModel.syncAttemptsFromCloud {
+                Toast.makeText(context, "Cloud sync complete.", Toast.LENGTH_SHORT).show()
+              }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = ProfessionalBlue),
+            shape = RoundedCornerShape(8.dp)
+          ) {
+            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Pull Submissions From Cloud")
+          }
+        }
       }
     } else {
       LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
         items(filteredAttempts) { att ->
-          val percent = if (att.totalQuestions > 0) (att.score * 100) / att.totalQuestions else 0
+          var candidateName = ""
+          var candidateEmail = ""
+          var candidateLevel = ""
+          var candidateSession = "Session 1"
+          var timeSpentSec = att.timeSpentSeconds
+
+          try {
+            if (att.answersJson.startsWith("{")) {
+              val json = JSONObject(att.answersJson)
+              val meta = json.optJSONObject("_meta")
+              if (meta != null) {
+                candidateName = meta.optString("student_name", "")
+                candidateEmail = meta.optString("student_email", "")
+                candidateLevel = meta.optString("student_level", "")
+                candidateSession = meta.optString("session_id", "Session 1")
+                val t = meta.optInt("time_spent_seconds", -1)
+                if (t >= 0) timeSpentSec = t
+              }
+            }
+          } catch (_: Exception) {}
+
+          val localStudent = studentMap[att.userId]
+          if (candidateName.isBlank() && localStudent != null) {
+            candidateName = localStudent.fullName
+          }
+          if (candidateEmail.isBlank() && localStudent != null) {
+            candidateEmail = localStudent.email
+          }
+          if (candidateLevel.isBlank() && localStudent != null) {
+            candidateLevel = localStudent.level
+          }
+          if (candidateName.isBlank()) {
+            candidateName = "Candidate #${att.userId}"
+          }
+          if (candidateEmail.isBlank()) {
+            candidateEmail = "Student ID #${att.userId}"
+          }
+
+          val total = if (att.totalQuestions > 0) att.totalQuestions else 15
+          val rawScore = if (att.score > total) (att.score * total) / 100 else att.score
+          val percent = if (total > 0) (rawScore * 100) / total else 0
           val passed = percent >= 50
+
+          val mins = timeSpentSec / 60
+          val secs = timeSpentSec % 60
+          val timeSpentFormatted = "${mins}m ${secs}s"
 
           Card(
             modifier = Modifier.fillMaxWidth(),
@@ -1063,33 +1314,78 @@ fun AdminScoreExportView(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Column(modifier = Modifier.weight(1f)) {
-                Text(att.examTitle, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Text(
+                    text = candidateName,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = ProfessionalBlue.copy(alpha = 0.12f)
+                  ) {
+                    Text(
+                      text = candidateSession,
+                      style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                      color = ProfessionalBlue,
+                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                  }
+                }
+
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(att.courseTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
                 Text(
-                  text = "Student ID #${att.userId} • Date: ${SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(att.timestamp))}",
-                  style = MaterialTheme.typography.labelSmall,
-                  color = TextMuted
+                  text = "$candidateEmail • ${candidateLevel.ifBlank { "200 Level" }}",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                Text(
+                  text = "${att.courseTitle} • ${att.examTitle}",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                  color = MaterialTheme.colorScheme.primary
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Icon(Icons.Default.Timer, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(
+                    text = "Time Spent: $timeSpentFormatted • Date: ${SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date(att.timestamp))}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted
+                  )
+                }
               }
 
               Column(horizontalAlignment = Alignment.End) {
                 Surface(
-                  shape = RoundedCornerShape(6.dp),
+                  shape = RoundedCornerShape(8.dp),
                   color = if (passed) SuccessGreen.copy(alpha = 0.15f) else ErrorRed.copy(alpha = 0.15f)
                 ) {
                   Text(
                     text = "$percent%",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = if (passed) SuccessGreen else ErrorRed,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                   )
                 }
                 Text(
-                  text = "${att.score}/${att.totalQuestions} Marks",
-                  style = MaterialTheme.typography.labelSmall,
+                  text = "$rawScore/$total Marks",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                   modifier = Modifier.padding(top = 2.dp)
+                )
+                Text(
+                  text = if (passed) "PASSED" else "FAILED",
+                  style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp
+                  ),
+                  color = if (passed) SuccessGreen else ErrorRed
                 )
               }
             }

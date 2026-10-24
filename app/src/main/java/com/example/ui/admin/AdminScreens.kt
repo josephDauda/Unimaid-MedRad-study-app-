@@ -79,6 +79,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -164,6 +165,11 @@ fun AdminDashboardScreen(
   val isSyncing by adminViewModel.isSyncing.collectAsState()
 
   var selectedSection by remember { mutableStateOf("Overview") }
+  LaunchedEffect(selectedSection) {
+    if (selectedSection == "Students" || selectedSection == "Overview" || selectedSection == "Score Export") {
+      adminViewModel.syncAttemptsFromCloud()
+    }
+  }
   val sections = listOf(
     "Overview",
     "Libraries & Drive",
@@ -1124,7 +1130,37 @@ fun AdminRolesView(
   onToggleActive: (UserEntity, Boolean) -> Unit,
   onRemoveAdmin: (UserEntity) -> Unit
 ) {
-  val isPrimary = currentUser.adminRole == "PRIMARY"
+  val isPrimary = currentUser.adminRole == "PRIMARY" || currentUser.email.equals("admin@medrad.edu.ng", ignoreCase = true) || currentUser.adminRole.isBlank()
+  var adminToDelete by remember { mutableStateOf<UserEntity?>(null) }
+
+  if (adminToDelete != null) {
+    val target = adminToDelete!!
+    AlertDialog(
+      onDismissRequest = { adminToDelete = null },
+      title = { Text("Delete Secondary Administrator", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+      text = {
+        Text("Are you sure you want to remove ${target.fullName} (${target.email}) as a secondary administrator? Their administrative privileges will be revoked and deleted from both local and cloud databases.")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val toRemove = target
+            adminToDelete = null
+            onRemoveAdmin(toRemove)
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+          shape = RoundedCornerShape(8.dp)
+        ) {
+          Text("Delete Admin")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { adminToDelete = null }) {
+          Text("Cancel")
+        }
+      }
+    )
+  }
 
   Column(modifier = Modifier.fillMaxSize()) {
     Spacer(modifier = Modifier.height(12.dp))
@@ -1169,7 +1205,7 @@ fun AdminRolesView(
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
       items(admins) { admin ->
-        val isTargetPrimary = admin.adminRole == "PRIMARY"
+        val isTargetPrimary = admin.adminRole == "PRIMARY" || admin.email.equals("admin@medrad.edu.ng", ignoreCase = true)
         Card(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(12.dp),
@@ -1220,7 +1256,7 @@ fun AdminRolesView(
                     onCheckedChange = { onToggleActive(admin, it) }
                   )
                   Spacer(modifier = Modifier.width(6.dp))
-                  IconButton(onClick = { onRemoveAdmin(admin) }, modifier = Modifier.size(32.dp)) {
+                  IconButton(onClick = { adminToDelete = admin }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Delete, contentDescription = "Remove Admin", tint = ErrorRed, modifier = Modifier.size(18.dp))
                   }
                 }
@@ -1382,6 +1418,21 @@ fun AdminStudentsView(
   students: List<UserEntity>,
   onRefresh: (() -> Unit)? = null
 ) {
+  var searchQuery by remember { mutableStateOf("") }
+  var selectedLevelFilter by remember { mutableStateOf("All") }
+  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+
+  val filteredStudents = remember(students, searchQuery, selectedLevelFilter) {
+    students.filter { s ->
+      val matchesSearch = searchQuery.isBlank() ||
+        s.fullName.contains(searchQuery, ignoreCase = true) ||
+        s.email.contains(searchQuery, ignoreCase = true) ||
+        s.phoneNumber.contains(searchQuery, ignoreCase = true)
+      val matchesLevel = selectedLevelFilter == "All" || s.level.contains(selectedLevelFilter, ignoreCase = true)
+      matchesSearch && matchesLevel
+    }
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     Spacer(modifier = Modifier.height(12.dp))
     Row(
@@ -1396,7 +1447,7 @@ fun AdminStudentsView(
           color = MaterialTheme.colorScheme.onSurface
         )
         Text(
-          text = "Real-time records synced from Supabase cloud",
+          text = "Real-time records deposited in database users list",
           style = MaterialTheme.typography.labelSmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1407,47 +1458,136 @@ fun AdminStudentsView(
         }
       }
     }
+
     Spacer(modifier = Modifier.height(10.dp))
 
-    LazyColumn(
-      modifier = Modifier.fillMaxSize(),
-      verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-      items(students) { s ->
-        Card(
-          modifier = Modifier.fillMaxWidth(),
-          shape = RoundedCornerShape(12.dp),
-          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-          border = BorderStroke(1.dp, BorderSubtle)
-        ) {
-          Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Column {
-              Text(s.fullName, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-              Text(s.email, style = MaterialTheme.typography.bodySmall, color = ProfessionalBlue)
-              Text("${s.university} • ${s.department} (${s.level})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    // Search bar for student name or Gmail
+    OutlinedTextField(
+      value = searchQuery,
+      onValueChange = { searchQuery = it },
+      modifier = Modifier.fillMaxWidth(),
+      placeholder = { Text("Search by name or Gmail address...") },
+      leadingIcon = {
+        Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+      },
+      trailingIcon = {
+        if (searchQuery.isNotBlank()) {
+          IconButton(onClick = { searchQuery = "" }) {
+            Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
+          }
+        }
+      },
+      singleLine = true,
+      shape = RoundedCornerShape(12.dp),
+      colors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+      )
+    )
 
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = if (s.isPremium) Color(0xFFFEF3C7) else MaterialTheme.colorScheme.surfaceVariant
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // Level filter row
+    LazyRow(
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      modifier = Modifier.fillMaxWidth()
+    ) {
+      items(levelOptions) { lvl ->
+        val isSelected = selectedLevelFilter == lvl
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+          modifier = Modifier.clickable { selectedLevelFilter = lvl }
+        ) {
+          Text(
+            text = lvl,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal),
+            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+          )
+        }
+      }
+    }
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    if (filteredStudents.isEmpty()) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(32.dp),
+        contentAlignment = Alignment.Center
+      ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+          Icon(Icons.Default.People, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(48.dp))
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            if (searchQuery.isNotBlank()) "No students match '$searchQuery'" else "No students registered yet in this category",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        }
+      }
+    } else {
+      LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+      ) {
+        items(filteredStudents) { s ->
+          Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, BorderSubtle)
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(14.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
             ) {
-              Text(
-                text = if (s.isPremium) "PREMIUM" else "FREE",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = if (s.isPremium) Color(0xFF92400E) else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-              )
+              Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                Surface(
+                  modifier = Modifier.size(42.dp),
+                  shape = CircleShape,
+                  color = ProfessionalBlue.copy(alpha = 0.12f)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Text(
+                      text = s.fullName.take(1).uppercase().ifBlank { "S" },
+                      style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                      color = ProfessionalBlue
+                    )
+                  }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                  Text(s.fullName, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
+                  Text(s.email, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium), color = ProfessionalBlue)
+                  if (s.phoneNumber.isNotBlank()) {
+                    Text("Phone: ${s.phoneNumber}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                  }
+                  Text("${s.department} • ${s.level}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+              }
+
+              Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (s.isPremium) Color(0xFFFEF3C7) else SuccessGreen.copy(alpha = 0.12f)
+              ) {
+                Text(
+                  text = if (s.isPremium) "PREMIUM" else "STUDENT",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = if (s.isPremium) Color(0xFF92400E) else SuccessGreen,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
             }
           }
         }
-      }
 
-      item {
-        Spacer(modifier = Modifier.height(24.dp))
+        item {
+          Spacer(modifier = Modifier.height(24.dp))
+        }
       }
     }
   }
@@ -2627,6 +2767,9 @@ fun AdminLiveCloudSyncView(
   var mockQuestionCount by remember(mockCardConfig.questionCount) { mutableStateOf(mockCardConfig.questionCount.toString()) }
   var mockDurationMinutes by remember(mockCardConfig.durationMinutes) { mutableStateOf(mockCardConfig.durationMinutes.toString()) }
   var mockQuestionIds by remember(mockCardConfig.questionIds) { mutableStateOf(mockCardConfig.questionIds) }
+  var mockRevealMode by remember(mockCardConfig.revealMode) { mutableStateOf(mockCardConfig.revealMode) }
+  var mockDeadlineString by remember(mockCardConfig.deadlineString) { mutableStateOf(mockCardConfig.deadlineString) }
+  var mockSessionId by remember(mockCardConfig.sessionId) { mutableStateOf(mockCardConfig.sessionId) }
   var mockCourseDropdownExpanded by remember { mutableStateOf(false) }
   var mockExamDropdownExpanded by remember { mutableStateOf(false) }
   var showMockQuestionPicker by remember { mutableStateOf(false) }
@@ -2853,7 +2996,7 @@ fun AdminLiveCloudSyncView(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-              text = "3. Paste the copied SQL script and click 'Run'. Once finished, return here and click 'Test Connection'!",
+              text = "3. Paste the copied SQL script and click 'Run'. Once finished, your database is configured for live cloud synchronization.",
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onSurface
             )
@@ -3404,6 +3547,70 @@ fun AdminLiveCloudSyncView(
 
           Spacer(modifier = Modifier.height(10.dp))
 
+          OutlinedTextField(
+            value = mockSessionId,
+            onValueChange = { mockSessionId = it },
+            label = { Text("Exam Session / Batch (e.g. Session 1, Fall 2026)") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp)
+          )
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          // Score Release Policy Selector
+          Text("Score Release Policy:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+          Spacer(modifier = Modifier.height(4.dp))
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { mockRevealMode = "INSTANT" },
+              color = if (mockRevealMode == "INSTANT") ProfessionalBlue.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface,
+              border = BorderStroke(1.dp, if (mockRevealMode == "INSTANT") ProfessionalBlue else BorderSubtle),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Instant Reveal", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = if (mockRevealMode == "INSTANT") ProfessionalBlue else MaterialTheme.colorScheme.onSurface)
+                Text("Students view score upon submit", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              }
+            }
+
+            Surface(
+              modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { mockRevealMode = "DEADLINE" },
+              color = if (mockRevealMode == "DEADLINE") WarningAmber.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface,
+              border = BorderStroke(1.dp, if (mockRevealMode == "DEADLINE") WarningAmber else BorderSubtle),
+              shape = RoundedCornerShape(8.dp)
+            ) {
+              Column(modifier = Modifier.padding(10.dp)) {
+                Text("Withhold / Deadline", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = if (mockRevealMode == "DEADLINE") Color(0xFFB45309) else MaterialTheme.colorScheme.onSurface)
+                Text("Withheld until deadline passes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.height(10.dp))
+
+          OutlinedTextField(
+            value = mockDeadlineString,
+            onValueChange = { mockDeadlineString = it },
+            label = { Text("Submission Deadline (e.g. 2026-11-20 18:00)") },
+            placeholder = { Text("YYYY-MM-DD HH:mm") },
+            supportingText = { Text("When deadline passes, a new session starts automatically with a fresh score sheet.") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp)
+          )
+
+          Spacer(modifier = Modifier.height(10.dp))
+
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -3436,6 +3643,21 @@ fun AdminLiveCloudSyncView(
             val selectedCourse = courses.find { it.id == mockCourseId }
             val count = if (mockQuestionIds.isNotEmpty()) mockQuestionIds.size else (mockQuestionCount.toIntOrNull() ?: 15)
             val dur = mockDurationMinutes.toIntOrNull() ?: 30
+
+            var parsedDeadline = 0L
+            if (mockDeadlineString.isNotBlank()) {
+              try {
+                parsedDeadline = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).parse(mockDeadlineString.trim())?.time ?: 0L
+              } catch (_: Exception) {
+                try {
+                  parsedDeadline = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(mockDeadlineString.trim())?.time ?: 0L
+                } catch (_: Exception) {}
+              }
+            }
+            if (parsedDeadline == 0L && mockRevealMode == "DEADLINE") {
+              parsedDeadline = System.currentTimeMillis() + (24 * 60 * 60 * 1000L)
+            }
+
             val updated = MockCardConfig(
               isConfigured = mockIsConfigured,
               courseId = mockCourseId,
@@ -3445,10 +3667,14 @@ fun AdminLiveCloudSyncView(
               examTitle = mockTitle.trim().ifBlank { "${selectedCourse?.code ?: "ANA 201"} Mock CBT" },
               questionCount = count,
               durationMinutes = dur,
-              questionIds = mockQuestionIds
+              questionIds = mockQuestionIds,
+              revealMode = mockRevealMode,
+              deadlineString = mockDeadlineString.trim(),
+              deadlineTimestamp = parsedDeadline,
+              sessionId = mockSessionId.trim().ifBlank { "Session 1" }
             )
             adminViewModel.updateMockCard(updated) {
-              feedbackMessage = if (mockIsConfigured) "Mock CBT Card pushed LIVE for ${updated.courseCode}!" else "Mock CBT Card set to 'Coming soon..' mode globally!"
+              feedbackMessage = if (mockIsConfigured) "Mock CBT Card pushed LIVE for ${updated.courseCode} (${updated.revealMode})!" else "Mock CBT Card set to 'Coming soon..' mode globally!"
             }
           },
           modifier = Modifier.fillMaxWidth().height(48.dp),

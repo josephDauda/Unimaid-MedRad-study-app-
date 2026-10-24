@@ -130,97 +130,102 @@ class CbtRepository(
       supabaseClient?.let { client ->
         scope.launch {
           try {
-            val examEntity = attempt.examId?.let { examDao.getExamById(it) }
-            val remoteExamId = examEntity?.remoteId
-            val remoteCourseId = examEntity?.remoteCourseId
-            val supabaseUid = client.getUserId()
-
-            // Only attempt remote sync if user has authenticated Supabase UUID
             val localUser = database.userDao().getUserById(attempt.userId)
-            val userEmail = localUser?.email
+            val userEmail = localUser?.email?.trim()?.lowercase()
 
-            var effectiveUid = if (supabaseUid != null && supabaseUid.length == 36 && supabaseUid.count { it == '-' } == 4) {
-              supabaseUid
-            } else if (!userEmail.isNullOrBlank()) {
+            val examEntity = attempt.examId?.let { examDao.getExamById(it) }
+            var remoteExamId = examEntity?.remoteId
+            var remoteCourseId = examEntity?.remoteCourseId
+
+            // If remoteCourseId is null, resolve from local courses by title/code
+            if (remoteCourseId.isNullOrBlank()) {
+              val allCourses = database.academicDao().getCoursesList()
+              val matched = allCourses.find {
+                it.title.equals(attempt.courseTitle, ignoreCase = true) ||
+                attempt.examTitle.contains(it.code, ignoreCase = true) ||
+                attempt.courseTitle.contains(it.code, ignoreCase = true)
+              }
+              remoteCourseId = matched?.remoteId
+            }
+
+            // 1. Resolve student UUID from Supabase profiles (or create/upsert profile if missing)
+            var finalUid: String? = null
+            if (!userEmail.isNullOrBlank()) {
               val profileRes = client.restGet("profiles?email=eq.$userEmail&select=id&limit=1")
               val profJson = profileRes.getOrNull() ?: "[]"
               try {
                 val arr = org.json.JSONArray(profJson)
-                if (arr.length() > 0) arr.getJSONObject(0).optString("id") else null
-              } catch (_: Exception) { null }
-            } else null
+                if (arr.length() > 0) finalUid = arr.getJSONObject(0).optString("id")
+              } catch (_: Exception) {}
 
-            val finalUid = effectiveUid ?: run {
-              val fallbackRes = client.restGet("profiles?select=id&limit=1")
-              val arr = org.json.JSONArray(fallbackRes.getOrNull() ?: "[]")
-              if (arr.length() > 0) arr.getJSONObject(0).optString("id")
-              else com.example.data.supabase.FlexibleIdHelper.toUuidString(attempt.userId, "student")
-            }
-            val finalExamId = if (!remoteExamId.isNullOrBlank()) remoteExamId else com.example.data.supabase.FlexibleIdHelper.toUuidString(attempt.examId ?: 1L, "exam")
-
-            var remoteAttemptId: String? = null
-
-            // 1. Attempt official RPC flow: start_exam_attempt -> save_exam_answer -> submit_exam_attempt
-            val startPayload = org.json.JSONObject().apply {
-              put("p_exam_id", finalExamId)
-            }
-            val startRes = client.callRpc("start_exam_attempt", startPayload.toString())
-            if (startRes.isSuccess) {
-              val startJson = startRes.getOrNull() ?: ""
-              remoteAttemptId = try {
-                if (startJson.startsWith("{")) {
-                  val obj = org.json.JSONObject(startJson)
-                  obj.optString("id").ifBlank { obj.optString("attempt_id") }
-                } else {
-                  startJson.replace("\"", "").trim()
+              if (finalUid.isNullOrBlank()) {
+                val newProfileUuid = java.util.UUID.randomUUID().toString()
+                val profilePayload = org.json.JSONObject().apply {
+                  put("id", newProfileUuid)
+                  put("email", userEmail)
+                  put("full_name", localUser.fullName)
+                  put("matric_number", localUser.phoneNumber)
+                  put("department", localUser.department)
+                  put("faculty", localUser.faculty)
+                  put("level", localUser.level)
+                  put("app_role", if (localUser.role == "ADMIN") "admin" else "student")
+                  put("is_active", true)
                 }
-              } catch (_: Exception) { null }
-
-              if (!remoteAttemptId.isNullOrBlank()) {
-                // Save individual answers if available
-                try {
-                  val answersObj = org.json.JSONObject(attempt.answersJson)
-                  val keys = answersObj.keys()
-                  while (keys.hasNext()) {
-                    val qKey = keys.next()
-                    val qObj = answersObj.optJSONObject(qKey) ?: continue
-                    val chosen = qObj.optString("chosen")
-                    val qLocalId = qKey.toLongOrNull() ?: continue
-                    val qRemote = questionDao.getQuestionById(qLocalId)?.remoteId
-                    if (!qRemote.isNullOrBlank() && chosen.isNotBlank()) {
-                      val ansPayload = org.json.JSONObject().apply {
-                        put("p_attempt_id", remoteAttemptId)
-                        put("p_question_id", qRemote)
-                        put("p_selected_option", chosen)
-                      }
-                      client.callRpc("save_exam_answer", ansPayload.toString())
-                    }
-                  }
-                } catch (e: Exception) {
-                  Log.w(tag, "Notice saving question answers via RPC: ${e.message}")
-                }
-
-                // Complete submission
-                val submitPayload = org.json.JSONObject().apply {
-                  put("p_attempt_id", remoteAttemptId)
-                }
-                client.callRpc("submit_exam_attempt", submitPayload.toString())
+                val upRes = client.restPost("profiles", profilePayload.toString(), upsert = true)
+                if (upRes.isSuccess) finalUid = newProfileUuid
               }
             }
 
-            // 2. Direct table upsert fallback with matching Supabase schema columns
-            if (remoteAttemptId.isNullOrBlank()) {
+            if (finalUid.isNullOrBlank()) {
+              val fallbackRes = client.restGet("profiles?select=id&limit=1")
+              val arr = org.json.JSONArray(fallbackRes.getOrNull() ?: "[]")
+              finalUid = if (arr.length() > 0) arr.getJSONObject(0).optString("id")
+              else com.example.data.supabase.FlexibleIdHelper.toUuidString(attempt.userId, "student")
+            }
+
+            // 2. Resolve or create exam in Supabase exams table to satisfy foreign key constraint
+            var resolvedExamId = remoteExamId
+            if (resolvedExamId.isNullOrBlank() || resolvedExamId.length != 36) {
+              val queryEndpoint = if (!remoteCourseId.isNullOrBlank()) "exams?course_id=eq.$remoteCourseId&limit=1" else "exams?limit=1"
+              val examRes = client.restGet(queryEndpoint)
+              val examJson = examRes.getOrNull() ?: "[]"
+              try {
+                val arr = org.json.JSONArray(examJson)
+                if (arr.length() > 0) {
+                  resolvedExamId = arr.getJSONObject(0).optString("id")
+                }
+              } catch (_: Exception) {}
+
+              if (resolvedExamId.isNullOrBlank()) {
+                val newExamUuid = java.util.UUID.randomUUID().toString()
+                val examPayload = org.json.JSONObject().apply {
+                  put("id", newExamUuid)
+                  if (!remoteCourseId.isNullOrBlank()) put("course_id", remoteCourseId)
+                  put("title", attempt.examTitle.ifBlank { "Departmental CBT Examination" })
+                  put("duration_minutes", maxOf(10, attempt.timeSpentSeconds / 60))
+                  put("total_questions", attempt.totalQuestions)
+                  put("is_published", true)
+                }
+                val res = client.restPost("exams", examPayload.toString(), upsert = true)
+                if (res.isSuccess) resolvedExamId = newExamUuid
+              }
+            }
+
+            // 3. Post exam attempt directly to Supabase exam_attempts
+            var remoteAttemptId: String? = null
+            if (!resolvedExamId.isNullOrBlank() && !finalUid.isNullOrBlank()) {
               val generatedAttemptId = java.util.UUID.randomUUID().toString()
               val pct = (attempt.score.toDouble() * 100.0) / maxOf(attempt.totalQuestions, 1)
               val isPassed = pct >= 50.0
               val isoDate = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
                 timeZone = java.util.TimeZone.getTimeZone("UTC")
               }.format(java.util.Date())
+
               val tablePayload = org.json.JSONObject().apply {
                 put("id", generatedAttemptId)
                 put("user_id", finalUid)
                 put("student_id", finalUid)
-                put("exam_id", finalExamId)
+                put("exam_id", resolvedExamId)
                 if (!remoteCourseId.isNullOrBlank()) {
                   put("course_id", remoteCourseId)
                 }
@@ -237,6 +242,9 @@ class CbtRepository(
               val directRes = client.restPost("exam_attempts", tablePayload.toString(), upsert = false)
               if (directRes.isSuccess) {
                 remoteAttemptId = generatedAttemptId
+                Log.i(tag, "Mock exam attempt synced to Supabase successfully: $generatedAttemptId")
+              } else {
+                Log.w(tag, "exam_attempts insert status: ${directRes.exceptionOrNull()?.message}")
               }
             }
 
@@ -244,11 +252,10 @@ class CbtRepository(
               val updatedAttempt = attempt.copy(
                 id = attemptId,
                 remoteId = remoteAttemptId,
-                remoteExamId = finalExamId,
+                remoteExamId = resolvedExamId,
                 remoteCourseId = remoteCourseId
               )
               examDao.insertAttempt(updatedAttempt)
-              Log.i(tag, "Exam attempt synced successfully with remoteId $remoteAttemptId")
             }
           } catch (e: Exception) {
             Log.w(tag, "Supabase attempt sync notice: ${e.message}")

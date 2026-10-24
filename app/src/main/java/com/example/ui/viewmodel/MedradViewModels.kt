@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import com.example.data.sync.CloudSyncManager
+import com.example.data.sync.MockCardConfig
 
 sealed interface UiState<out T> {
   data object Idle : UiState<Nothing>
@@ -99,7 +101,7 @@ class AuthViewModel(
   fun register(
     fullName: String,
     email: String,
-    phoneNumber: String = "",
+    phoneNumber: String,
     password: String,
     university: String = "University of Maiduguri",
     faculty: String = "College of Medical Sciences",
@@ -107,8 +109,12 @@ class AuthViewModel(
     level: String = "100 Level",
     semester: String = "First Semester"
   ) {
-    if (fullName.isBlank() || email.isBlank() || password.isBlank() || university.isBlank() || department.isBlank()) {
-      _authActionState.value = UiState.Error("Please fill out all required academic registration fields.")
+    if (fullName.isBlank() || email.isBlank() || phoneNumber.isBlank() || password.isBlank()) {
+      _authActionState.value = UiState.Error("Please provide your name, Gmail, phone number, and personal password.")
+      return
+    }
+    if (password.length < 6) {
+      _authActionState.value = UiState.Error("Personal password must be at least 6 characters.")
       return
     }
     viewModelScope.launch {
@@ -127,6 +133,22 @@ class AuthViewModel(
       result.fold(
         onSuccess = { user -> _authActionState.value = UiState.Success(user) },
         onFailure = { err -> _authActionState.value = UiState.Error(err.message ?: "Registration failed") }
+      )
+    }
+  }
+
+  fun instantAccessWithEmail(email: String, fullName: String = "") {
+    if (email.isBlank() || !email.contains("@")) {
+      _authActionState.value = UiState.Error("Please enter a valid Gmail / student email.")
+      return
+    }
+    viewModelScope.launch {
+      _authActionState.value = UiState.Loading
+      val studentName = if (fullName.isNotBlank()) fullName else email.substringBefore("@").replace(".", " ")
+      val result = authRepository.signInWithGoogle(email.trim().lowercase(), studentName)
+      result.fold(
+        onSuccess = { user -> _authActionState.value = UiState.Success(user) },
+        onFailure = { err -> _authActionState.value = UiState.Error(err.message ?: "Instant access failed") }
       )
     }
   }
@@ -253,7 +275,8 @@ data class CbtSessionState(
 
 class CbtViewModel(
   private val cbtRepository: CbtRepository,
-  private val academicRepository: AcademicRepository? = null
+  private val academicRepository: AcademicRepository? = null,
+  private val cloudSyncManager: CloudSyncManager? = null
 ) : ViewModel() {
   private val _sessionState = MutableStateFlow(CbtSessionState())
   val sessionState: StateFlow<CbtSessionState> = _sessionState.asStateFlow()
@@ -462,6 +485,29 @@ class CbtViewModel(
       } else {
         60
       }
+
+      val isMockExam = state.isExamMode && (
+        state.examTitle.contains("Mock", ignoreCase = true) ||
+        state.examTitle.contains("CBT", ignoreCase = true)
+      )
+      val mockConfig = cloudSyncManager?.mockCardConfig?.value ?: com.example.data.sync.MockCardConfig()
+
+      // Attach detailed candidate & session metadata for isolated score sheet generation
+      val metaObj = JSONObject().apply {
+        put("student_name", user.fullName)
+        put("student_email", user.email)
+        put("student_level", user.level)
+        put("student_phone", user.phoneNumber)
+        put("matric_number", user.email)
+        put("session_id", if (isMockExam && mockConfig.sessionId.isNotBlank()) mockConfig.sessionId else "Session 1")
+        put("reveal_mode", if (isMockExam) mockConfig.revealMode else "INSTANT")
+        put("deadline_string", if (isMockExam) mockConfig.deadlineString else "")
+        put("deadline_timestamp", if (isMockExam) mockConfig.deadlineTimestamp else 0L)
+        put("is_mock_exam", isMockExam)
+        put("time_spent_seconds", if (timeSpent < 0) 0 else timeSpent)
+        put("submitted_at", System.currentTimeMillis())
+      }
+      jsonAnswers.put("_meta", metaObj)
 
       val attempt = ExamAttemptEntity(
         userId = user.id,
@@ -722,12 +768,23 @@ class AdminViewModel(
   fun loadStats() {
     viewModelScope.launch {
       cloudSyncManager?.pullProfiles()
+      cloudSyncManager?.pullExamAttempts()
       _stats.value = adminRepository.getDashboardStats()
     }
   }
 
   fun syncProfilesFromCloud(onDone: () -> Unit = {}) {
     viewModelScope.launch {
+      cloudSyncManager?.pullProfiles()
+      cloudSyncManager?.pullExamAttempts()
+      _stats.value = adminRepository.getDashboardStats()
+      onDone()
+    }
+  }
+
+  fun syncAttemptsFromCloud(onDone: () -> Unit = {}) {
+    viewModelScope.launch {
+      cloudSyncManager?.pullExamAttempts()
       cloudSyncManager?.pullProfiles()
       _stats.value = adminRepository.getDashboardStats()
       onDone()
@@ -1039,7 +1096,14 @@ class AdminViewModel(
     viewModelScope.launch {
       val res = adminRepository.addSecondaryAdmin(creator, fullName, email, phone, pass, permissions, assignedCourses)
       res.fold(
-        onSuccess = { onResult(true, null) },
+        onSuccess = { newAdminId ->
+          val newAdmin = adminRepository.getAdminById(newAdminId)
+          if (newAdmin != null) {
+            cloudSyncManager?.broadcastProfile(newAdmin)
+          }
+          loadStats()
+          onResult(true, null)
+        },
         onFailure = { onResult(false, it.message) }
       )
     }
@@ -1056,7 +1120,14 @@ class AdminViewModel(
     viewModelScope.launch {
       val res = adminRepository.updateAdminPermissions(modifier, adminId, permissions, assignedCourses, isActive)
       res.fold(
-        onSuccess = { onResult(true, null) },
+        onSuccess = {
+          val updated = adminRepository.getAdminById(adminId)
+          if (updated != null) {
+            cloudSyncManager?.broadcastProfile(updated)
+          }
+          loadStats()
+          onResult(true, null)
+        },
         onFailure = { onResult(false, it.message) }
       )
     }
@@ -1068,9 +1139,16 @@ class AdminViewModel(
     onResult: (Boolean, String?) -> Unit
   ) {
     viewModelScope.launch {
+      val target = adminRepository.getAdminById(adminId)
       val res = adminRepository.removeAdmin(remover, adminId)
       res.fold(
-        onSuccess = { onResult(true, null) },
+        onSuccess = {
+          if (target != null) {
+            cloudSyncManager?.deleteProfileCloud(target.email)
+          }
+          loadStats()
+          onResult(true, null)
+        },
         onFailure = { onResult(false, it.message) }
       )
     }
