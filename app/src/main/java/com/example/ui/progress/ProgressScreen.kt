@@ -60,7 +60,10 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -780,8 +783,8 @@ fun ProgressScreen(
     EditProfileModal(
       user = user,
       onDismiss = { showEditProfileDialog = false },
-      onSave = { newName, newPhone ->
-        authViewModel.updateProfile(user.id, newName, newPhone) { success, _ ->
+      onSave = { newName, newPhone, newLevel ->
+        authViewModel.updateProfile(user.id, newName, newPhone, newLevel) { success, _ ->
           if (success) {
             userProfilePreferences.setCustomDisplayName(newName)
             authViewModel.refreshUser()
@@ -950,14 +953,23 @@ private fun PreferenceToggleRow(
   }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditProfileModal(
   user: UserEntity,
   onDismiss: () -> Unit,
-  onSave: (newName: String, newPhone: String) -> Unit
+  onSave: (newName: String, newPhone: String, newLevel: String) -> Unit
 ) {
   var name by remember { mutableStateOf(user.fullName) }
   var phone by remember { mutableStateOf(user.phoneNumber) }
+  val levels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+  var selectedLevel by remember {
+    mutableStateOf(
+      if (user.level in levels) user.level
+      else com.example.data.util.LevelClassifier.normalizeLevel(user.level)
+    )
+  }
+  var levelExpanded by remember { mutableStateOf(false) }
   var error by remember { mutableStateOf<String?>(null) }
 
   AlertDialog(
@@ -968,7 +980,7 @@ fun EditProfileModal(
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-          "Update your personal student details below. Official institution records remain verified.",
+          "Update your personal student details and academic level. Content and CBT modules adapt automatically to your selected level.",
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -992,7 +1004,38 @@ fun EditProfileModal(
           shape = RoundedCornerShape(12.dp)
         )
 
-        // Read-only Academic Records (Protected per User Request)
+        // Academic Level Dropdown (Permits students to change level)
+        ExposedDropdownMenuBox(
+          expanded = levelExpanded,
+          onExpandedChange = { levelExpanded = it },
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          OutlinedTextField(
+            value = selectedLevel,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Academic Level (Filters Courses & Mock CBT)") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = levelExpanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            shape = RoundedCornerShape(12.dp)
+          )
+          ExposedDropdownMenu(
+            expanded = levelExpanded,
+            onDismissRequest = { levelExpanded = false }
+          ) {
+            levels.forEach { lvl ->
+              DropdownMenuItem(
+                text = { Text(lvl) },
+                onClick = {
+                  selectedLevel = lvl
+                  levelExpanded = false
+                }
+              )
+            }
+          }
+        }
+
+        // Institutional details
         Surface(
           shape = RoundedCornerShape(12.dp),
           color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -1000,23 +1043,8 @@ fun EditProfileModal(
           modifier = Modifier.fillMaxWidth()
         ) {
           Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(Icons.Default.Lock, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(16.dp))
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                "Official Academic Records (Protected)",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                color = WarningAmber
-              )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
             Text(
-              "${user.department} • ${user.level}",
-              style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-              color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-              user.university,
+              "${user.department} • University of Maiduguri",
               style = MaterialTheme.typography.labelSmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1032,7 +1060,7 @@ fun EditProfileModal(
       Button(
         onClick = {
           if (name.trim().length >= 3) {
-            onSave(name.trim(), phone.trim())
+            onSave(name.trim(), phone.trim(), selectedLevel)
           } else {
             error = "Please enter a valid full name (minimum 3 characters)"
           }

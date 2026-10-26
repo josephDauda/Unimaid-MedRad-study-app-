@@ -221,66 +221,71 @@ class AuthRepository(private val context: Context, private val database: AppData
           return@withContext Result.success(updatedUser)
         }
 
-        // Handle unconfirmed Supabase email gracefully - no code confirmation needed!
+        // Handle unconfirmed Supabase email or existing profiles gracefully - no code confirmation needed
         val cloudError = authResult.exceptionOrNull()?.message ?: ""
         if (cloudError.contains("Email not confirmed", ignoreCase = true) || cloudError.contains("invalid_grant", ignoreCase = true)) {
           if (localUser != null && PasswordSecurity.verifyPassword(password, localUser.passwordHash)) {
-            prefs.edit().putLong("logged_in_user_id", localUser.id).apply()
-            _currentUser.value = localUser
-            return@withContext Result.success(localUser)
+            val checked = checkAndUpdatePremiumExpiry(localUser)
+            prefs.edit().putLong("logged_in_user_id", checked.id).apply()
+            _currentUser.value = checked
+            return@withContext Result.success(checked)
+          } else if (localUser != null) {
+            return@withContext Result.failure(Exception("Incorrect password for $trimmedEmail. Please try again."))
           } else if (password.length >= 6) {
-            var remoteName = "Radiography Scholar"
-            var remotePhone = ""
-            var remoteLevel = "100 Level"
-            var remoteDept = "Medical Radiography"
+            // Strictly check if user is registered in remote database profiles before granting access
+            var remoteProfile: SupabaseProfile? = null
             try {
               val profRes = supabaseClient.restGet("profiles?email=eq.$trimmedEmail&select=*")
               profRes.onSuccess { json ->
                 val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, SupabaseProfile::class.java)
                 val list = supabaseClient.moshi.adapter<List<SupabaseProfile>>(type).fromJson(json)
-                list?.firstOrNull()?.let { p ->
-                  p.fullName?.let { remoteName = it }
-                  p.matricNumber?.let { remotePhone = it }
-                  p.level?.let { remoteLevel = it }
-                  p.department?.let { remoteDept = it }
-                }
+                remoteProfile = list?.firstOrNull()
               }
             } catch (_: Exception) {}
 
-            val existingUser = database.userDao().getUserByEmail(trimmedEmail)
-            val userToLogin = if (existingUser != null) {
-              val updated = existingUser.copy(
-                fullName = remoteName,
-                phoneNumber = if (remotePhone.isNotBlank()) remotePhone else existingUser.phoneNumber,
-                passwordHash = PasswordSecurity.hashPassword(password)
-              )
-              database.userDao().updateUser(updated)
-              updated
-            } else {
+            if (remoteProfile != null) {
+              val p = remoteProfile!!
+              val remoteRole = if (trimmedEmail == "admin@medrad.edu.ng" || p.appRole?.equals("admin", ignoreCase = true) == true) "ADMIN" else "STUDENT"
               val newUser = UserEntity(
-                fullName = remoteName,
+                fullName = p.fullName?.ifBlank { "Radiography Scholar" } ?: "Radiography Scholar",
                 email = trimmedEmail,
-                phoneNumber = remotePhone,
+                phoneNumber = p.matricNumber ?: "",
                 passwordHash = PasswordSecurity.hashPassword(password),
-                role = if (trimmedEmail == "admin@medrad.edu.ng") "ADMIN" else "STUDENT",
+                role = remoteRole,
                 university = "University of Maiduguri",
-                faculty = "College of Medical Sciences",
-                department = remoteDept,
-                level = remoteLevel,
+                faculty = p.faculty ?: "College of Medical Sciences",
+                department = p.department ?: "Medical Radiography",
+                level = p.level ?: "100 Level",
                 semester = "First Semester",
-                isPremium = trimmedEmail == "admin@medrad.edu.ng"
+                isPremium = remoteRole == "ADMIN"
               )
               val id = database.userDao().insertUser(newUser)
-              newUser.copy(id = id)
+              val savedUser = newUser.copy(id = id)
+              prefs.edit().putLong("logged_in_user_id", savedUser.id).apply()
+              _currentUser.value = savedUser
+              return@withContext Result.success(savedUser)
+            } else {
+              return@withContext Result.failure(
+                Exception("User account is not registered on the database. Please register to create your account.")
+              )
             }
-            prefs.edit().putLong("logged_in_user_id", userToLogin.id).apply()
-            _currentUser.value = userToLogin
-            return@withContext Result.success(userToLogin)
+          }
+        }
+
+        // Check if user exists locally
+        if (localUser != null) {
+          if (PasswordSecurity.verifyPassword(password, localUser.passwordHash)) {
+            val checked = checkAndUpdatePremiumExpiry(localUser)
+            prefs.edit().putLong("logged_in_user_id", checked.id).apply()
+            _currentUser.value = checked
+            return@withContext Result.success(checked)
+          } else {
+            return@withContext Result.failure(Exception("Incorrect password for $trimmedEmail. Please try again."))
           }
         }
 
         return@withContext Result.failure(
-          Exception("Invalid email or password. Please verify your credentials or register a new account.")
+          Exception("Account not found. Please register on the database first to access MedRad.")
         )
       } catch (e: Exception) {
         Result.failure(e)
@@ -614,14 +619,20 @@ class AuthRepository(private val context: Context, private val database: AppData
     }
   }
 
-  suspend fun updateProfile(userId: Long, newFullName: String, newPhoneNumber: String): Result<UserEntity> {
+  suspend fun updateProfile(
+    userId: Long,
+    newFullName: String,
+    newPhoneNumber: String,
+    newLevel: String? = null
+  ): Result<UserEntity> {
     return withContext(Dispatchers.IO) {
       try {
         val user = database.userDao().getUserById(userId)
           ?: return@withContext Result.failure(Exception("User account not found."))
         val updated = user.copy(
           fullName = newFullName.trim().ifEmpty { user.fullName },
-          phoneNumber = newPhoneNumber.trim()
+          phoneNumber = newPhoneNumber.trim(),
+          level = if (!newLevel.isNullOrBlank()) com.example.data.util.LevelClassifier.normalizeLevel(newLevel) else user.level
         )
         database.userDao().updateUser(updated)
         _currentUser.value = updated

@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.text.style.TextAlign
 import com.example.data.util.ScoreSheetPdfGenerator
+import com.example.data.util.LevelClassifier
 import org.json.JSONObject
 import android.widget.Toast
 import androidx.compose.material3.AlertDialog
@@ -942,7 +943,8 @@ fun AdminPushNotificationsView(
  */
 @Composable
 fun AdminScoreExportView(
-  adminViewModel: AdminViewModel
+  adminViewModel: AdminViewModel,
+  currentUser: UserEntity? = null
 ) {
   val attempts by adminViewModel.allAttempts.collectAsState()
   val courses by adminViewModel.allCourses.collectAsState()
@@ -950,11 +952,28 @@ fun AdminScoreExportView(
   val isSyncing by adminViewModel.isSyncing.collectAsState()
   val context = LocalContext.current
 
+  val isPrimary = currentUser == null ||
+      currentUser.adminRole.equals("PRIMARY", ignoreCase = true) ||
+      currentUser.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+      currentUser.adminRole.isBlank()
+  val secondaryAdminLevel = if (!isPrimary) LevelClassifier.normalizeLevel(currentUser?.assignedCourses?.ifBlank { currentUser?.level }) else null
+
+  var selectedLevelFilter by remember { mutableStateOf(if (!isPrimary && secondaryAdminLevel != null) secondaryAdminLevel else "All Levels") }
+  val levelOptions = listOf("All Levels", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+
   LaunchedEffect(Unit) {
     adminViewModel.syncAttemptsFromCloud()
   }
 
   val studentMap = remember(students) { students.associateBy { it.id } }
+
+  val scopedCourses = remember(courses, isPrimary, secondaryAdminLevel) {
+    if (!isPrimary && secondaryAdminLevel != null) {
+      courses.filter { LevelClassifier.matchesLevel(secondaryAdminLevel, it.code) || LevelClassifier.matchesLevel(secondaryAdminLevel, it.level) }
+    } else {
+      courses
+    }
+  }
 
   var selectedCourseFilter by remember { mutableStateOf("All Courses") }
   var courseFilterExpanded by remember { mutableStateOf(false) }
@@ -962,7 +981,7 @@ fun AdminScoreExportView(
   var selectedSessionFilter by remember { mutableStateOf("All Sessions") }
   var sessionFilterExpanded by remember { mutableStateOf(false) }
 
-  val courseNames = listOf("All Courses") + courses.map { it.code }
+  val courseNames = listOf("All Courses") + scopedCourses.map { it.code }
 
   val sessionNames = remember(attempts) {
     val found = attempts.mapNotNull { att ->
@@ -975,8 +994,11 @@ fun AdminScoreExportView(
     listOf("All Sessions") + if (found.isEmpty()) listOf("Session 1") else found
   }
 
-  val selectedCourse = courses.find { it.code.equals(selectedCourseFilter, ignoreCase = true) }
+  val selectedCourse = scopedCourses.find { it.code.equals(selectedCourseFilter, ignoreCase = true) }
   val filteredAttempts = attempts.filter { att ->
+    val matchLevel = (selectedLevelFilter == "All Levels") ||
+                      LevelClassifier.matchesLevel(selectedLevelFilter, att.courseTitle) ||
+                      LevelClassifier.matchesLevel(selectedLevelFilter, att.examTitle)
     val matchCourse = (selectedCourseFilter == "All Courses") ||
                       att.courseTitle.contains(selectedCourseFilter, ignoreCase = true) ||
                       att.examTitle.contains(selectedCourseFilter, ignoreCase = true) ||
@@ -987,7 +1009,7 @@ fun AdminScoreExportView(
       } else "Session 1"
     } catch (_: Exception) { "Session 1" }
     val matchSession = (selectedSessionFilter == "All Sessions") || session.equals(selectedSessionFilter, ignoreCase = true)
-    matchCourse && matchSession
+    matchLevel && matchCourse && matchSession
   }
 
   val totalCandidates = filteredAttempts.size
@@ -1082,6 +1104,44 @@ fun AdminScoreExportView(
     }
 
     Spacer(modifier = Modifier.height(12.dp))
+
+    // Academic Level Selector
+    if (isPrimary) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+      ) {
+        levelOptions.take(4).forEach { lvl ->
+          val isSel = selectedLevelFilter == lvl
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (isSel) ProfessionalBlue else MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.clickable { selectedLevelFilter = lvl }
+          ) {
+            Text(
+              text = lvl,
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal),
+              color = if (isSel) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+          }
+        }
+      }
+      Spacer(modifier = Modifier.height(8.dp))
+    } else {
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = ProfessionalBlue.copy(alpha = 0.12f),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+      ) {
+        Text(
+          text = "Assigned Level Roster: $secondaryAdminLevel (Secondary Admin)",
+          style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+          color = ProfessionalBlue,
+          modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+      }
+    }
 
     // Filter Controls: Course and Session
     Row(

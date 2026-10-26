@@ -162,6 +162,7 @@ class AdminRepository(private val database: AppDatabase) {
 
   // Primary Admin & Secondary Admins Role System
   fun getAllAdmins(): Flow<List<UserEntity>> = userDao.getAllAdmins()
+  fun getAllUsers(): Flow<List<UserEntity>> = userDao.getAllUsers()
 
   suspend fun addSecondaryAdmin(
     creator: UserEntity,
@@ -181,7 +182,23 @@ class AdminRepository(private val database: AppDatabase) {
 
       val existing = userDao.getUserByEmail(email.trim())
       if (existing != null) {
-        return@withContext Result.failure(IllegalArgumentException("An account with this email already exists."))
+        if (existing.role == "ADMIN" && (existing.adminRole.equals("PRIMARY", ignoreCase = true) || existing.email.equals("admin@medrad.edu.ng", ignoreCase = true))) {
+          return@withContext Result.failure(IllegalArgumentException("The Primary Administrator account cannot be modified."))
+        }
+        // Promote existing registered user / student to Secondary Admin
+        val updatedAdmin = existing.copy(
+          fullName = fullName.trim().ifBlank { existing.fullName },
+          phoneNumber = phoneNumber.trim().ifBlank { existing.phoneNumber },
+          passwordHash = if (rawPassword.isNotBlank()) com.example.data.util.PasswordSecurity.hashPassword(rawPassword) else existing.passwordHash,
+          role = "ADMIN",
+          adminRole = "SECONDARY",
+          permissions = permissions.ifBlank { "materials,questions,announcements,libraries,exams" },
+          assignedCourses = assignedCourses.trim(),
+          isActive = true,
+          isPremium = true
+        )
+        userDao.updateUser(updatedAdmin)
+        return@withContext Result.success(updatedAdmin.id)
       }
 
       val newAdmin = UserEntity(

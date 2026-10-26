@@ -127,6 +127,7 @@ fun ResultsScreen(
       val deadlineString = meta?.optString("deadline_string", "") ?: ""
       val studentName = meta?.optString("student_name", "") ?: ""
       val sessionId = meta?.optString("session_id", "Session 1") ?: "Session 1"
+      val autoSubmittedReason = meta?.optString("auto_submitted_reason", "") ?: ""
 
       val isDeadlinePassed = deadlineTimestamp > 0L && System.currentTimeMillis() >= deadlineTimestamp
       val isScoresConfidential = isMockExam && (revealMode.equals("DEADLINE", ignoreCase = true)) && !isDeadlinePassed
@@ -279,6 +280,25 @@ fun ResultsScreen(
                   style = MaterialTheme.typography.bodySmall,
                   color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (autoSubmittedReason == "TERMINATED_APP_SWITCH") {
+                  Spacer(modifier = Modifier.height(12.dp))
+                  Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = ErrorRed.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, ErrorRed.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                  ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                      Icon(Icons.Default.Lock, contentDescription = null, tint = ErrorRed, modifier = Modifier.size(22.dp))
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Column {
+                        Text("Exam Terminated by System", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = ErrorRed)
+                        Text("App-switch detected during live examination (Anti-Cheating Policy). Answers were automatically submitted.", style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp), color = MaterialTheme.colorScheme.onSurface)
+                      }
+                    }
+                  }
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 

@@ -59,8 +59,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -142,6 +147,24 @@ fun CbtScreen(
   LaunchedEffect(sessionState.isSubmitted, sessionState.submittedAttemptId) {
     if (sessionState.isSubmitted && sessionState.submittedAttemptId != null) {
       onExamSubmitted(sessionState.submittedAttemptId!!)
+    }
+  }
+
+  // Anti-Cheating & Exam Lockdown:
+  // Leaving the exam window or switching apps terminates and auto-submits the exam immediately.
+  val lifecycleOwner = LocalLifecycleOwner.current
+  DisposableEffect(lifecycleOwner, sessionState.isExamMode, sessionState.isSubmitted) {
+    val observer = LifecycleEventObserver { _, event ->
+      if (sessionState.isExamMode && !sessionState.isSubmitted && !sessionState.isLoading && sessionState.questions.isNotEmpty()) {
+        if (event == Lifecycle.Event.ON_STOP) {
+          Log.w("CbtScreen", "User switched app or minimized window during live examination. Auto-submitting due to anti-cheating policy.")
+          cbtViewModel.submitExam(user, "TERMINATED_APP_SWITCH")
+        }
+      }
+    }
+    lifecycleOwner.lifecycle.addObserver(observer)
+    onDispose {
+      lifecycleOwner.lifecycle.removeObserver(observer)
     }
   }
 
@@ -257,6 +280,49 @@ fun CbtScreen(
       if (sessionState.isLoading) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
           CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        }
+      } else if (sessionState.isDeadlineExpired) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+          contentAlignment = Alignment.Center
+        ) {
+          Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.Lock,
+              contentDescription = null,
+              modifier = Modifier.size(56.dp),
+              tint = ErrorRed
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+              text = "Examination Session Closed",
+              style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+              color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = if (sessionState.deadlineString.isNotBlank()) {
+                "The scheduled deadline (${sessionState.deadlineString}) for this departmental mock examination has passed. Candidate submissions are closed."
+              } else {
+                "This mock examination session has elapsed. Submissions are no longer accepted."
+              },
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(
+              onClick = onNavigateBack,
+              shape = RoundedCornerShape(10.dp)
+            ) {
+              Text("Return to Dashboard")
+            }
+          }
         }
       } else if (sessionState.questions.isEmpty()) {
         Box(

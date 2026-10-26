@@ -1,5 +1,6 @@
 package com.example.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import com.example.data.sync.CloudSyncManager
 import com.example.data.sync.MockCardConfig
+import com.example.data.util.LevelClassifier
 
 sealed interface UiState<out T> {
   data object Idle : UiState<Nothing>
@@ -168,9 +170,15 @@ class AuthViewModel(
     }
   }
 
-  fun updateProfile(userId: Long, newFullName: String, newPhoneNumber: String, onResult: (Boolean, String?) -> Unit) {
+  fun updateProfile(
+    userId: Long,
+    newFullName: String,
+    newPhoneNumber: String,
+    newLevel: String? = null,
+    onResult: (Boolean, String?) -> Unit
+  ) {
     viewModelScope.launch {
-      val res = authRepository.updateProfile(userId, newFullName, newPhoneNumber)
+      val res = authRepository.updateProfile(userId, newFullName, newPhoneNumber, newLevel)
       res.fold(
         onSuccess = { onResult(true, null) },
         onFailure = { onResult(false, it.message) }
@@ -241,6 +249,10 @@ class DashboardViewModel(
       _dailyAllowance.value = remaining
       val attempts = cbtRepository.getUserAttemptsList(user.id, 5)
       _recentAttempts.value = attempts
+      try {
+        cloudSyncManager?.pullAppConfig()
+        cloudSyncManager?.pullExams()
+      } catch (_: Exception) {}
     }
   }
 
@@ -270,7 +282,11 @@ data class CbtSessionState(
   val isSubmitted: Boolean = false,
   val submittedAttemptId: Long? = null,
   val isLoading: Boolean = false,
-  val showSubmissionDialog: Boolean = false
+  val showSubmissionDialog: Boolean = false,
+  val deadlineString: String = "",
+  val deadlineTimestamp: Long = 0L,
+  val sessionId: String = "Session 1",
+  val isDeadlineExpired: Boolean = false
 )
 
 class CbtViewModel(
@@ -317,11 +333,33 @@ class CbtViewModel(
         course?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
       }
 
-      val questions = if (specificQuestionIds.isNotEmpty()) {
-        val specific = cbtRepository.getQuestionsByIds(specificQuestionIds).filter { it.courseId == effectiveCourseId }
+      // Pull latest questions from cloud if network is available
+      try {
+        cloudSyncManager?.pullQuestions(effectiveCourseId)
+      } catch (_: Exception) {}
+
+      var questions = if (specificQuestionIds.isNotEmpty()) {
+        val specific = cbtRepository.getQuestionsByIds(specificQuestionIds)
         if (specific.isNotEmpty()) specific else cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
       } else {
         cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
+      }
+
+      if (questions.isEmpty()) {
+        val fallback = cbtRepository.getExamQuestions(effectiveCourseId, questionCount, allowDepartmentalFallback = true)
+        val levelFiltered = fallback.filter { q ->
+          val parentCourse = academicRepository?.getCourseById(q.courseId)
+          LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
+        }
+        questions = if (levelFiltered.isNotEmpty()) levelFiltered else fallback
+        if (questions.isEmpty()) {
+          val allPublished = academicRepository?.getAllQuestionsList()?.filter { it.isPublished } ?: emptyList()
+          val levelMatching = allPublished.filter { q ->
+            val parentCourse = academicRepository?.getCourseById(q.courseId)
+            LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
+          }
+          questions = if (levelMatching.isNotEmpty()) levelMatching.take(questionCount) else allPublished.take(questionCount)
+        }
       }
 
       val displayExamTitle = if (course != null) {
@@ -344,27 +382,101 @@ class CbtViewModel(
     }
   }
 
-  fun startMockExam(exam: ExamEntity, user: UserEntity) {
+  fun startMockExam(
+    exam: ExamEntity,
+    user: UserEntity,
+    specificQuestionIds: List<Long> = emptyList()
+  ) {
     viewModelScope.launch {
       _sessionState.value = CbtSessionState(isLoading = true)
-      val durationSecs = exam.durationMinutes * 60
-      val questions = cbtRepository.getExamQuestions(exam.courseId, exam.totalQuestions, exam.remoteId).filter { it.courseId == exam.courseId }
-      val course = academicRepository?.getCourseById(exam.courseId)
-      val code = course?.code ?: "ANA 201"
-      val title = course?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
 
-      val displayExamTitle = if (exam.title.isNotBlank()) exam.title else "$code — $title Mock Exam"
+      // 1. Pull latest questions, exams and configurations from cloud so new admin questions appear immediately
+      try {
+        cloudSyncManager?.pullExams()
+        cloudSyncManager?.pullQuestions(exam.courseId)
+        cloudSyncManager?.pullAppConfig()
+      } catch (e: Exception) {
+        Log.w("CbtViewModel", "Cloud sync on mock exam start notice: ${e.message}")
+      }
+
+      val mockConfig = cloudSyncManager?.mockCardConfig?.value ?: com.example.data.sync.MockCardConfig()
+      val isExpired = mockConfig.deadlineTimestamp > 0 && System.currentTimeMillis() >= mockConfig.deadlineTimestamp
+      if (isExpired) {
+        _sessionState.value = CbtSessionState(
+          isExamMode = true,
+          isDeadlineExpired = true,
+          isLoading = false,
+          deadlineString = mockConfig.deadlineString,
+          deadlineTimestamp = mockConfig.deadlineTimestamp,
+          sessionId = mockConfig.sessionId,
+          examTitle = mockConfig.examTitle.ifBlank { "Mock Exam Session Closed" }
+        )
+        return@launch
+      }
+
+      val durationSecs = if (exam.durationMinutes > 0) exam.durationMinutes * 60 else maxOf(30, mockConfig.durationMinutes) * 60
+
+      // 2. Resolve questions: Check specificQuestionIds parameter, then mockConfig.questionIds, then exam / course questions with departmental fallback
+      val targetIds = if (specificQuestionIds.isNotEmpty()) specificQuestionIds else mockConfig.questionIds
+      var resolvedQuestions: List<QuestionEntity> = if (targetIds.isNotEmpty()) {
+        val specific = cbtRepository.getQuestionsByIds(targetIds)
+        if (specific.isNotEmpty()) specific else emptyList()
+      } else {
+        emptyList()
+      }
+
+      if (resolvedQuestions.isEmpty()) {
+        val qLimit = maxOf(exam.totalQuestions, mockConfig.questionCount.takeIf { it > 0 } ?: 15)
+        val examQuestions = cbtRepository.getExamQuestions(
+          courseId = exam.courseId,
+          totalQuestions = qLimit,
+          examRemoteId = exam.remoteId,
+          allowDepartmentalFallback = true
+        )
+        // Strictly filter candidate questions to the student's registered level so Level 100 and Level 200 concurrent exams never mix
+        val levelMatchingExamQ = examQuestions.filter { q ->
+          val parentCourse = academicRepository?.getCourseById(q.courseId)
+          LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
+        }
+        resolvedQuestions = if (levelMatchingExamQ.isNotEmpty()) {
+          levelMatchingExamQ
+        } else if (examQuestions.isNotEmpty()) {
+          examQuestions
+        } else {
+          // If no questions specific to this course ID, pull from published questions bank strictly matching candidate's level
+          val allQ = academicRepository?.getAllQuestionsList() ?: emptyList()
+          val levelMatchingBank = allQ.filter { q ->
+            q.isPublished && LevelClassifier.matchesUserLevel(user, academicRepository?.getCourseById(q.courseId)?.code, academicRepository?.getCourseById(q.courseId)?.level)
+          }
+          if (levelMatchingBank.isNotEmpty()) {
+            levelMatchingBank.take(qLimit)
+          } else {
+            val published = allQ.filter { it.isPublished }
+            if (published.isNotEmpty()) published.take(qLimit) else allQ.take(qLimit)
+          }
+        }
+      }
+
+      val course = academicRepository?.getCourseById(exam.courseId)
+      val code = course?.code ?: mockConfig.courseCode.ifBlank { "ANA 201" }
+      val title = course?.title ?: mockConfig.courseTitle.ifBlank { "GROSS ANATOMY OF UPPER AND LOWER LIMBS" }
+
+      val displayExamTitle = if (exam.title.isNotBlank()) exam.title else mockConfig.examTitle.ifBlank { "$code — $title Mock Exam" }
 
       _sessionState.value = CbtSessionState(
         isExamMode = true,
         examId = exam.id,
         examTitle = displayExamTitle,
         courseTitle = "$code — $title",
-        questions = questions,
+        questions = resolvedQuestions,
         currentIndex = 0,
         timeRemainingSeconds = durationSecs,
         initialDurationSeconds = durationSecs,
         dailyAllowanceRemaining = if (user.isPremium || user.role == "ADMIN") 9999 else cbtRepository.getRemainingAllowance(user),
+        deadlineString = mockConfig.deadlineString,
+        deadlineTimestamp = mockConfig.deadlineTimestamp,
+        sessionId = mockConfig.sessionId,
+        isDeadlineExpired = false,
         isLoading = false
       )
 
@@ -375,13 +487,26 @@ class CbtViewModel(
   private fun startTimer(user: UserEntity) {
     timerJob?.cancel()
     timerJob = viewModelScope.launch {
+      val mockConfig = cloudSyncManager?.mockCardConfig?.value
       while (_sessionState.value.timeRemainingSeconds > 0 && !_sessionState.value.isSubmitted) {
         delay(1000)
         val newTime = _sessionState.value.timeRemainingSeconds - 1
-        _sessionState.value = _sessionState.value.copy(timeRemainingSeconds = newTime)
+        val currentDeadline = _sessionState.value.deadlineTimestamp.takeIf { it > 0 }
+          ?: (mockConfig?.deadlineTimestamp?.takeIf { it > 0 } ?: 0L)
+        val isDeadlineElapsed = currentDeadline > 0 && System.currentTimeMillis() >= currentDeadline
+
+        _sessionState.value = _sessionState.value.copy(
+          timeRemainingSeconds = newTime,
+          isDeadlineExpired = isDeadlineElapsed
+        )
+
+        if (isDeadlineElapsed) {
+          Log.i("CbtViewModel", "Mock exam session deadline elapsed during exam. Auto-submitting now.")
+          break
+        }
       }
-      if (_sessionState.value.timeRemainingSeconds <= 0 && !_sessionState.value.isSubmitted) {
-        // Auto submit when time reaches zero
+      if (!_sessionState.value.isSubmitted) {
+        // Auto submit when time reaches zero or session deadline elapsed
         submitExam(user)
       }
     }
@@ -449,7 +574,7 @@ class CbtViewModel(
     _sessionState.value = _sessionState.value.copy(showSubmissionDialog = show)
   }
 
-  fun submitExam(user: UserEntity) {
+  fun submitExam(user: UserEntity, submissionReason: String? = null) {
     timerJob?.cancel()
     val state = _sessionState.value
     if (state.isSubmitted || state.questions.isEmpty()) return
@@ -498,7 +623,7 @@ class CbtViewModel(
         put("student_email", user.email)
         put("student_level", user.level)
         put("student_phone", user.phoneNumber)
-        put("matric_number", user.email)
+        put("matric_number", if (user.phoneNumber.isNotBlank()) user.phoneNumber else user.email)
         put("session_id", if (isMockExam && mockConfig.sessionId.isNotBlank()) mockConfig.sessionId else "Session 1")
         put("reveal_mode", if (isMockExam) mockConfig.revealMode else "INSTANT")
         put("deadline_string", if (isMockExam) mockConfig.deadlineString else "")
@@ -506,6 +631,9 @@ class CbtViewModel(
         put("is_mock_exam", isMockExam)
         put("time_spent_seconds", if (timeSpent < 0) 0 else timeSpent)
         put("submitted_at", System.currentTimeMillis())
+        if (!submissionReason.isNullOrBlank()) {
+          put("auto_submitted_reason", submissionReason)
+        }
       }
       jsonAnswers.put("_meta", metaObj)
 
@@ -640,6 +768,9 @@ class AdminViewModel(
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
   val allAdmins = adminRepository.getAllAdmins()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+  val allUsers = adminRepository.getAllUsers()
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
   val globalCardStyle = cloudSyncManager?.globalCardStyle ?: MutableStateFlow("NAVY_GOLD")

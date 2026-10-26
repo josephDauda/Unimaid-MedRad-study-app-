@@ -128,6 +128,7 @@ class CloudSyncManager(
   private val prefs = context.getSharedPreferences("medrad_cloud_sync_prefs", Context.MODE_PRIVATE)
   private val scope = CoroutineScope(Dispatchers.IO)
   private val tag = "CloudSyncManager"
+  private val uuidToEmail = java.util.concurrent.ConcurrentHashMap<String, String>()
 
   val supabaseClient = SupabaseClient(context)
 
@@ -847,6 +848,13 @@ class CloudSyncManager(
         if (entities.isNotEmpty()) {
           database.notificationDao().insertNotifications(entities)
         }
+        val remoteAnnouncementIds = list.map { it.id }.toSet()
+        val localNotifications = database.notificationDao().getAllNotifications()
+        for (ln in localNotifications) {
+          if (ln.isSyncedWithCloud && !remoteAnnouncementIds.contains(ln.id)) {
+            database.notificationDao().deleteNotificationById(ln.id)
+          }
+        }
       } catch (e: Exception) {
         Log.e(tag, "Failed to parse announcements: ${e.message}")
       }
@@ -891,11 +899,13 @@ class CloudSyncManager(
       val list = supabaseClient.moshi.adapter<List<SupabaseProfile>>(type).fromJson(json) ?: emptyList()
       for (p in list) {
         val email = p.email?.trim()?.lowercase() ?: continue
+        p.id?.let { uuidToEmail[it] = email }
         val resolvedRole = if (p.appRole?.equals("admin", ignoreCase = true) == true || email == "admin@medrad.edu.ng") "ADMIN" else "STUDENT"
         val existing = database.userDao().getUserByEmail(email)
         if (existing != null) {
           val updated = existing.copy(
             fullName = p.fullName?.ifBlank { existing.fullName } ?: existing.fullName,
+            phoneNumber = if (!p.matricNumber.isNullOrBlank()) p.matricNumber else existing.phoneNumber,
             role = resolvedRole,
             department = p.department ?: existing.department,
             faculty = p.faculty ?: existing.faculty,
@@ -908,10 +918,10 @@ class CloudSyncManager(
           val newUser = UserEntity(
             fullName = p.fullName ?: "Student",
             email = email,
-            phoneNumber = "",
+            phoneNumber = p.matricNumber ?: "",
             passwordHash = "",
             role = resolvedRole,
-            adminRole = if (email == "admin@medrad.edu.ng") "PRIMARY" else "SECONDARY",
+            adminRole = if (email == "admin@medrad.edu.ng") "PRIMARY" else if (resolvedRole == "ADMIN") "SECONDARY" else "",
             permissions = if (resolvedRole == "ADMIN") "ALL" else "",
             isActive = p.isActive,
             university = "University of Maiduguri",
@@ -950,7 +960,10 @@ class CloudSyncManager(
         val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
         val localExamId = localExam?.id ?: parseJsonId(record, "exam_id", 0L)
         val studentUuid = record.optString("student_id").ifBlank { record.optString("user_id") }
-        val localUser = if (studentUuid.isNotBlank()) database.userDao().getUserByEmail(studentUuid) else null
+        val userEmail = uuidToEmail[studentUuid] ?: (if (studentUuid.contains("@")) studentUuid else null)
+        val localUser = if (!userEmail.isNullOrBlank()) database.userDao().getUserByEmail(userEmail)
+          else if (studentUuid.isNotBlank()) database.userDao().getUserByEmail(studentUuid)
+          else null
         val localUserId = localUser?.id ?: FlexibleIdHelper.toPositiveLong(studentUuid, 1L)
 
         val existing = database.examDao().getAttemptByRemoteId(remoteUuid)
@@ -963,16 +976,33 @@ class CloudSyncManager(
         val resolvedCourseTitle = resolvedCourse?.let { "${it.code} - ${it.title}" }
           ?: record.optString("course_title").ifBlank { "Medical Radiography" }
 
+        val candidateName = record.optString("student_name").ifBlank { localUser?.fullName ?: "Candidate #${localUserId}" }
+        val candidateEmail = record.optString("student_email").ifBlank { localUser?.email ?: userEmail ?: "" }
+        val candidateLevel = record.optString("student_level").ifBlank { localUser?.level ?: "200 Level" }
+        val candidatePhone = record.optString("student_phone").ifBlank { localUser?.phoneNumber ?: "" }
+
         val answersJsonStr = if (existing != null && existing.answersJson.isNotBlank() && existing.answersJson != "{}") {
-          existing.answersJson
+          try {
+            val j = JSONObject(existing.answersJson)
+            val meta = j.optJSONObject("_meta") ?: JSONObject()
+            if (!meta.has("student_name") || meta.optString("student_name").isBlank()) {
+              meta.put("student_name", candidateName)
+              meta.put("student_email", candidateEmail)
+              meta.put("student_level", candidateLevel)
+              meta.put("student_phone", candidatePhone)
+              j.put("_meta", meta)
+            }
+            j.toString()
+          } catch (_: Exception) {
+            existing.answersJson
+          }
         } else {
           val metaObj = JSONObject().apply {
             put("session_id", record.optString("session_id", "Session 1"))
-            if (localUser != null) {
-              put("student_name", localUser.fullName)
-              put("student_email", localUser.email)
-              put("student_level", localUser.level)
-            }
+            put("student_name", candidateName)
+            put("student_email", candidateEmail)
+            put("student_level", candidateLevel)
+            put("student_phone", candidatePhone)
           }
           JSONObject().apply { put("_meta", metaObj) }.toString()
         }
@@ -1142,11 +1172,19 @@ class CloudSyncManager(
         val endpoint = if (courseId != null) {
           val courseEntity = database.academicDao().getCourseById(courseId)
           val cUuid = courseEntity?.remoteId ?: FlexibleIdHelper.toUuidString(courseId, "course")
-          "questions?course_id=eq.$cUuid&select=*&order=id.asc&limit=$pageSize&offset=$offset"
+          "questions?course_id=eq.$cUuid&select=*&order=created_at.desc&limit=$pageSize&offset=$offset"
         } else {
-          "questions?select=*&order=id.asc&limit=$pageSize&offset=$offset"
+          "questions?select=*&order=created_at.desc&limit=$pageSize&offset=$offset"
         }
-        val res = supabaseClient.restGet(endpoint)
+        var res = supabaseClient.restGet(endpoint)
+        if (res.isFailure && courseId != null) {
+          // Fallback to general questions endpoint if course-specific endpoint returned error
+          res = supabaseClient.restGet("questions?select=*&order=created_at.desc&limit=$pageSize&offset=$offset")
+        }
+        if (res.isFailure) {
+          // Also fallback to un-ordered endpoint in case created_at column is not indexed in Supabase
+          res = supabaseClient.restGet("questions?select=*&limit=$pageSize&offset=$offset")
+        }
         if (res.isFailure) {
           Log.e(tag, "pullQuestions failed at offset $offset: ${res.exceptionOrNull()?.message}")
           return@withContext (totalProcessed > 0)
@@ -1163,10 +1201,17 @@ class CloudSyncManager(
             val examRemoteId = q.examId?.toString()
             val courseRemoteId = q.courseId?.toString()
             val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+              ?: courseRemoteId?.let { database.academicDao().getCourseByCode(it) }
+              ?: (examRemoteId?.let { database.examDao().getExamByRemoteId(it)?.courseId })?.let { database.academicDao().getCourseById(it) }
+              ?: (courseId?.let { database.academicDao().getCourseById(it) })
+              ?: database.academicDao().getCoursesList().firstOrNull()
             val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
             val localCourseId = localCourse?.id ?: localExam?.courseId ?: courseId ?: 1L
             val existing = database.questionDao().getQuestionByRemoteId(remoteUuid)
             val localId = existing?.id ?: FlexibleIdHelper.toPositiveLong(q.id, 0L)
+
+            // Any question created by admin with is_active = true is published for CBT
+            val isPublished = if (q.isPublished == false && !q.isActive) false else true
 
             database.questionDao().insertQuestion(
               QuestionEntity(
@@ -1182,7 +1227,7 @@ class CloudSyncManager(
                 explanation = q.explanation ?: "Refer to clinical radiology modules for verified rationale.",
                 difficulty = q.difficulty ?: "Medium",
                 isPremium = q.isPremium ?: false,
-                isPublished = q.isPublished ?: q.isActive,
+                isPublished = isPublished,
                 isDemo = q.isDemo ?: false,
                 questionType = q.questionType ?: "MULTIPLE_CHOICE",
                 assessmentTitle = q.assessmentTitle ?: "Continuous Assessment",
@@ -1209,6 +1254,7 @@ class CloudSyncManager(
           database.questionDao().deleteQuestion(lq)
         }
       }
+      Log.i(tag, "Successfully pulled and synchronized $totalProcessed questions from Supabase cloud.")
       true
     } catch (e: Exception) {
       Log.e(tag, "Error parsing questions: ${e.message}")

@@ -115,7 +115,15 @@ fun CoursesScreen(
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
   val isSyncing by (cloudSyncManager?.isSyncing ?: remember { MutableStateFlow(false) }).collectAsState()
-  val courses by academicRepository.getAllCourses().collectAsState(initial = emptyList())
+  val allCourses by academicRepository.getAllCourses().collectAsState(initial = emptyList())
+  val courses = remember(allCourses, user.level, user.role, user.adminRole) {
+    if (user.role == "ADMIN") {
+      allCourses
+    } else {
+      val levelFiltered = allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
+      if (levelFiltered.isNotEmpty()) levelFiltered else allCourses
+    }
+  }
 
   var selectedCourseId by remember { mutableStateOf<Long?>(null) }
   val activeCourse = courses.find { it.id == selectedCourseId } ?: courses.firstOrNull()

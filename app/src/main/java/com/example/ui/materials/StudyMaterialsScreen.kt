@@ -98,8 +98,16 @@ fun StudyMaterialsScreen(
   val context = LocalContext.current
   val coroutineScope = rememberCoroutineScope()
   val isSyncing by (cloudSyncManager?.isSyncing ?: remember { MutableStateFlow(false) }).collectAsState()
-  val materials by academicRepository.getAllMaterials().collectAsState(initial = emptyList())
-  val courses by academicRepository.getAllCourses().collectAsState(initial = emptyList())
+  val allMaterials by academicRepository.getAllMaterials().collectAsState(initial = emptyList())
+  val allCourses by academicRepository.getAllCourses().collectAsState(initial = emptyList())
+  val courseMap = remember(allCourses) { allCourses.associateBy { it.id } }
+  val courses = remember(allCourses, user.level, user.role, user.adminRole) {
+    if (user.role == "ADMIN") allCourses
+    else {
+      val lf = allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
+      if (lf.isNotEmpty()) lf else allCourses
+    }
+  }
 
   var searchQuery by remember { mutableStateOf("") }
   var selectedCourseId by remember { mutableStateOf<Long?>(null) } // null means "All Courses"
@@ -109,13 +117,15 @@ fun StudyMaterialsScreen(
 
   val categories = listOf("All", "Lecture Note", "Handout", "Revision Summary", "Past Question")
 
-  val filteredMaterials = materials.filter { mat ->
+  val filteredMaterials = allMaterials.filter { mat ->
+    val parentCourse = courseMap[mat.courseId]
+    val matchesLevel = user.role == "ADMIN" || com.example.data.util.LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
     val matchesCourse = (selectedCourseId == null || mat.courseId == selectedCourseId)
     val matchesCategory = (selectedCategory == "All" || mat.contentType.equals(selectedCategory, ignoreCase = true))
     val matchesSearch = mat.title.contains(searchQuery, ignoreCase = true) ||
         mat.description.contains(searchQuery, ignoreCase = true) ||
         mat.contentBody.contains(searchQuery, ignoreCase = true)
-    matchesCourse && matchesCategory && matchesSearch
+    matchesLevel && matchesCourse && matchesCategory && matchesSearch
   }
 
   BackHandler {

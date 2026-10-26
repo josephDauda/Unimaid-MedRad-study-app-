@@ -102,17 +102,19 @@ class CbtRepository(
       } else emptyList()
 
       val courseQuestions = questionDao.getPublishedQuestionsForCourseList(courseId)
-      val questions = if (specificExamQuestions.isNotEmpty()) {
-        specificExamQuestions
-      } else if (courseQuestions.isNotEmpty()) {
-        courseQuestions
-      } else if (allowDepartmentalFallback || courseId == 9999L) {
-        // Departmental fallback pool for authorized general assessments
-        questionDao.getAllQuestionsList().filter { it.isPublished }
-      } else {
-        emptyList()
+      val basePool = (specificExamQuestions + courseQuestions).distinctBy { it.id }.toMutableList()
+
+      if (basePool.size < totalQuestions && (allowDepartmentalFallback || courseId == 9999L)) {
+        val extra = questionDao.getAllQuestionsList().filter { it.isPublished }
+        for (q in extra) {
+          if (!basePool.any { it.id == q.id }) {
+            basePool.add(q)
+            if (basePool.size >= totalQuestions) break
+          }
+        }
       }
-      questions.shuffled().take(totalQuestions)
+
+      basePool.shuffled().take(totalQuestions)
     }
   }
 
@@ -177,10 +179,25 @@ class CbtRepository(
             }
 
             if (finalUid.isNullOrBlank()) {
-              val fallbackRes = client.restGet("profiles?select=id&limit=1")
-              val arr = org.json.JSONArray(fallbackRes.getOrNull() ?: "[]")
-              finalUid = if (arr.length() > 0) arr.getJSONObject(0).optString("id")
-              else com.example.data.supabase.FlexibleIdHelper.toUuidString(attempt.userId, "student")
+              finalUid = if (!userEmail.isNullOrBlank()) {
+                java.util.UUID.nameUUIDFromBytes("supabase:$userEmail".toByteArray()).toString()
+              } else {
+                com.example.data.supabase.FlexibleIdHelper.toUuidString(attempt.userId, "student")
+              }
+              if (localUser != null) {
+                val profilePayload = org.json.JSONObject().apply {
+                  put("id", finalUid)
+                  if (!userEmail.isNullOrBlank()) put("email", userEmail)
+                  put("full_name", localUser.fullName)
+                  put("matric_number", localUser.phoneNumber)
+                  put("department", localUser.department)
+                  put("faculty", localUser.faculty)
+                  put("level", localUser.level)
+                  put("app_role", if (localUser.role == "ADMIN") "admin" else "student")
+                  put("is_active", true)
+                }
+                client.restPost("profiles", profilePayload.toString(), upsert = true)
+              }
             }
 
             // 2. Resolve or create exam in Supabase exams table to satisfy foreign key constraint
@@ -211,7 +228,7 @@ class CbtRepository(
               }
             }
 
-            // 3. Post exam attempt directly to Supabase exam_attempts
+            // 3. Post exam attempt directly to Supabase exam_attempts with full candidate metadata
             var remoteAttemptId: String? = null
             if (!resolvedExamId.isNullOrBlank() && !finalUid.isNullOrBlank()) {
               val generatedAttemptId = java.util.UUID.randomUUID().toString()
@@ -238,8 +255,22 @@ class CbtRepository(
                 put("passed", isPassed)
                 put("is_passed", isPassed)
                 put("percentage", pct)
+                if (localUser != null) {
+                  put("student_name", localUser.fullName)
+                  put("student_email", localUser.email)
+                  put("student_phone", localUser.phoneNumber)
+                }
               }
-              val directRes = client.restPost("exam_attempts", tablePayload.toString(), upsert = false)
+              var directRes = client.restPost("exam_attempts", tablePayload.toString(), upsert = false)
+              if (directRes.isFailure) {
+                val err = directRes.exceptionOrNull()?.message ?: ""
+                if (err.contains("PGRST204") || err.contains("Could not find the") || err.contains("column") || err.contains("student_name")) {
+                  tablePayload.remove("student_name")
+                  tablePayload.remove("student_email")
+                  tablePayload.remove("student_phone")
+                  directRes = client.restPost("exam_attempts", tablePayload.toString(), upsert = false)
+                }
+              }
               if (directRes.isSuccess) {
                 remoteAttemptId = generatedAttemptId
                 Log.i(tag, "Mock exam attempt synced to Supabase successfully: $generatedAttemptId")

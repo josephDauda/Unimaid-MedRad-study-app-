@@ -50,6 +50,12 @@ interface UserDao {
   @Query("SELECT * FROM users WHERE role = 'ADMIN' ORDER BY createdAt ASC")
   suspend fun getAllAdminsList(): List<UserEntity>
 
+  @Query("SELECT * FROM users ORDER BY fullName ASC")
+  fun getAllUsers(): Flow<List<UserEntity>>
+
+  @Query("SELECT * FROM users ORDER BY fullName ASC")
+  suspend fun getAllUsersList(): List<UserEntity>
+
   @androidx.room.Delete
   suspend fun deleteUser(user: UserEntity)
 }

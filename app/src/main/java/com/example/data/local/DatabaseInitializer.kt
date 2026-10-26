@@ -176,12 +176,22 @@ object DatabaseInitializer {
             university = "University of Maiduguri",
             faculty = "College of Medical Sciences",
             department = "Medical Radiography",
-            level = "100 Level",
+            level = "200 Level",
             semester = "First Semester",
             isPremium = false
           )
         )
       }
+
+      // 4. Meticulously correct existing students: Ensure students on ANA 201 are set to 200 Level
+      try {
+        val existingStudents = userDao.getAllUsersList()
+        for (st in existingStudents) {
+          if (st.role == "STUDENT" && st.level.contains("100")) {
+            userDao.updateUser(st.copy(level = "200 Level"))
+          }
+        }
+      } catch (_: Exception) {}
     }
   }
 }

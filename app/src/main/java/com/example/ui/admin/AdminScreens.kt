@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sync
@@ -117,6 +118,7 @@ import com.example.data.local.entity.QuestionEntity
 import com.example.data.local.entity.StudyMaterialEntity
 import com.example.data.local.entity.SubscriptionEntity
 import com.example.data.local.entity.UserEntity
+import com.example.data.util.LevelClassifier
 import com.example.data.sync.DailyCbtSprintConfig
 import com.example.data.sync.MockCardConfig
 import com.example.data.sync.PracticeCardConfig
@@ -163,6 +165,7 @@ fun AdminDashboardScreen(
   val libraries by adminViewModel.allLibraries.collectAsState()
   val admins by adminViewModel.allAdmins.collectAsState()
   val isSyncing by adminViewModel.isSyncing.collectAsState()
+  val mockCardConfig by adminViewModel.mockCardConfig.collectAsState()
 
   var selectedSection by remember { mutableStateOf("Overview") }
   LaunchedEffect(selectedSection) {
@@ -195,6 +198,7 @@ fun AdminDashboardScreen(
   var showAddLibraryDialog by remember { mutableStateOf(false) }
   var editingLibrary by remember { mutableStateOf<CourseLibraryEntity?>(null) }
   var showAddAdminDialog by remember { mutableStateOf(false) }
+  var preSelectedStudentForAdmin by remember { mutableStateOf<UserEntity?>(null) }
 
   val hasOpenDialog = showAddQuestionDialog || showAddExamDialog || showAddMaterialDialog ||
       showAddAcademicDialog || showAddLibraryDialog || (editingLibrary != null) || showAddAdminDialog
@@ -206,7 +210,10 @@ fun AdminDashboardScreen(
     else if (showAddAcademicDialog) showAddAcademicDialog = false
     else if (showAddLibraryDialog) showAddLibraryDialog = false
     else if (editingLibrary != null) editingLibrary = null
-    else if (showAddAdminDialog) showAddAdminDialog = false
+    else if (showAddAdminDialog) {
+      showAddAdminDialog = false
+      preSelectedStudentForAdmin = null
+    }
     else if (selectedSection != "Overview") selectedSection = "Overview"
     else onNavigateBack()
   }
@@ -313,18 +320,21 @@ fun AdminDashboardScreen(
           "Questions" -> AdminQuestionsView(
             questions = questions,
             courses = courses,
+            currentUser = user,
             onAddQuestion = { showAddQuestionDialog = true },
             onDeleteQuestion = { adminViewModel.deleteQuestion(it) },
             onClearAllQuestions = { adminViewModel.clearAllQuestions() }
           )
           "Exam Builder" -> AdminExamsView(
             exams = exams,
+            mockCardConfig = mockCardConfig,
             onAddExam = { showAddExamDialog = true },
             onDeleteExam = { adminViewModel.deleteExam(it) }
           )
           "Study Materials" -> AdminMaterialsView(
             materials = materials,
             courses = courses,
+            currentUser = user,
             onAddMaterial = { showAddMaterialDialog = true },
             onDeleteMaterial = { adminViewModel.deleteMaterial(it) }
           )
@@ -332,7 +342,10 @@ fun AdminDashboardScreen(
           "Admin Roles" -> AdminRolesView(
             admins = admins,
             currentUser = user,
-            onAddSecondaryAdmin = { showAddAdminDialog = true },
+            onAddSecondaryAdmin = {
+              preSelectedStudentForAdmin = null
+              showAddAdminDialog = true
+            },
             onToggleActive = { admin, active ->
               adminViewModel.updateAdminPermissions(user, admin.id, admin.permissions, admin.assignedCourses, active) { _, _ -> }
             },
@@ -347,9 +360,17 @@ fun AdminDashboardScreen(
           )
           "Students" -> AdminStudentsView(
             students = students,
-            onRefresh = { adminViewModel.syncProfilesFromCloud() }
+            currentUser = user,
+            onRefresh = { adminViewModel.syncProfilesFromCloud() },
+            onPromoteToAdmin = { student ->
+              preSelectedStudentForAdmin = student
+              showAddAdminDialog = true
+            }
           )
-          "Score Export" -> AdminScoreExportView(adminViewModel = adminViewModel)
+          "Score Export" -> AdminScoreExportView(
+            adminViewModel = adminViewModel,
+            currentUser = user
+          )
           "Global Card Theme" -> AdminGlobalCardStyleView(adminViewModel = adminViewModel)
           "About App Mgmt" -> AdminAboutAppView(adminViewModel = adminViewModel)
           "Feedback Inbox" -> AdminFeedbackInboxView(adminViewModel = adminViewModel)
@@ -360,10 +381,22 @@ fun AdminDashboardScreen(
     }
   }
 
+  val isPrimaryAdmin = user.adminRole.equals("PRIMARY", ignoreCase = true) ||
+      user.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+      user.adminRole.isBlank()
+  val secondaryAdminScopeLevel = if (!isPrimaryAdmin) LevelClassifier.normalizeLevel(user.assignedCourses.ifBlank { user.level }) else null
+  val scopedAdminCourses = remember(courses, isPrimaryAdmin, secondaryAdminScopeLevel) {
+    if (!isPrimaryAdmin && secondaryAdminScopeLevel != null) {
+      courses.filter { LevelClassifier.matchesLevel(secondaryAdminScopeLevel, it.code) || LevelClassifier.matchesLevel(secondaryAdminScopeLevel, it.level) }
+    } else {
+      courses
+    }
+  }
+
   // Modals for creating items
   if (showAddQuestionDialog) {
     AddQuestionDialog(
-      courses = courses,
+      courses = scopedAdminCourses,
       onDismiss = { showAddQuestionDialog = false },
       onSave = { courseId, topicId, text, a, b, c, d, correct, explanation, diff, isPrem, qType, aTitle, marks, timeSec, target ->
         adminViewModel.createQuestion(
@@ -392,7 +425,7 @@ fun AdminDashboardScreen(
 
   if (showAddExamDialog) {
     AddExamDialog(
-      courses = courses,
+      courses = scopedAdminCourses,
       onDismiss = { showAddExamDialog = false },
       onSave = { courseId, title, desc, duration, count, isPrem ->
         adminViewModel.createExam(courseId, title, desc, duration, count, isPrem) {
@@ -404,7 +437,7 @@ fun AdminDashboardScreen(
 
   if (showAddMaterialDialog) {
     AddMaterialDialog(
-      courses = courses,
+      courses = scopedAdminCourses,
       onDismiss = { showAddMaterialDialog = false },
       onSave = { courseId, topicId, title, desc, type, body, isPrem, extUrl ->
         adminViewModel.createMaterial(
@@ -462,7 +495,12 @@ fun AdminDashboardScreen(
   if (showAddAdminDialog) {
     AddSecondaryAdminDialog(
       courses = courses,
-      onDismiss = { showAddAdminDialog = false },
+      students = students,
+      preSelectedStudent = preSelectedStudentForAdmin,
+      onDismiss = {
+        showAddAdminDialog = false
+        preSelectedStudentForAdmin = null
+      },
       onSave = { fullName, email, phone, pass, permissions, assignedCourses, onComplete ->
         adminViewModel.addSecondaryAdmin(
           creator = user,
@@ -476,6 +514,7 @@ fun AdminDashboardScreen(
           onComplete(success, error)
           if (success) {
             showAddAdminDialog = false
+            preSelectedStudentForAdmin = null
           }
         }
       }
@@ -666,11 +705,43 @@ fun AdminStatCard(
 fun AdminQuestionsView(
   questions: List<QuestionEntity>,
   courses: List<CourseEntity>,
+  currentUser: UserEntity? = null,
   onAddQuestion: () -> Unit,
   onDeleteQuestion: (QuestionEntity) -> Unit,
   onClearAllQuestions: () -> Unit = {}
 ) {
   var showClearConfirm by remember { mutableStateOf(false) }
+
+  val isPrimary = currentUser == null ||
+      currentUser.adminRole.equals("PRIMARY", ignoreCase = true) ||
+      currentUser.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+      currentUser.adminRole.isBlank()
+  val secondaryAdminLevel = if (!isPrimary) LevelClassifier.normalizeLevel(currentUser?.assignedCourses?.ifBlank { currentUser?.level }) else null
+
+  var selectedLevelFilter by remember { mutableStateOf("All") }
+  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+
+  val baseQuestions = remember(questions, isPrimary, secondaryAdminLevel) {
+    if (!isPrimary && secondaryAdminLevel != null) {
+      questions.filter { q ->
+        val courseCode = courses.find { it.id == q.courseId }?.code
+        LevelClassifier.matchesLevel(secondaryAdminLevel, courseCode)
+      }
+    } else {
+      questions
+    }
+  }
+
+  val displayQuestions = remember(baseQuestions, selectedLevelFilter, isPrimary) {
+    if (isPrimary && selectedLevelFilter != "All") {
+      baseQuestions.filter { q ->
+        val courseCode = courses.find { it.id == q.courseId }?.code
+        LevelClassifier.matchesLevel(selectedLevelFilter, courseCode)
+      }
+    } else {
+      baseQuestions
+    }
+  }
 
   if (showClearConfirm) {
     AlertDialog(
@@ -703,13 +774,20 @@ fun AdminQuestionsView(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text(
-        text = "Question Bank (${questions.size} items)",
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-        color = MaterialTheme.colorScheme.onSurface
-      )
+      Column {
+        Text(
+          text = if (isPrimary) "Question Bank (${displayQuestions.size} of ${questions.size})" else "Question Bank: $secondaryAdminLevel (${displayQuestions.size})",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+          text = if (isPrimary) "Alpha Admin Oversight — All academic levels" else "Secondary Admin: Level $secondaryAdminLevel",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (questions.isNotEmpty()) {
+        if (displayQuestions.isNotEmpty() && isPrimary) {
           OutlinedButton(
             onClick = { showClearConfirm = true },
             shape = RoundedCornerShape(8.dp)
@@ -736,11 +814,35 @@ fun AdminQuestionsView(
 
     Spacer(modifier = Modifier.height(10.dp))
 
+    if (isPrimary) {
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        items(levelOptions) { lvl ->
+          val isSelected = selectedLevelFilter == lvl
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.clickable { selectedLevelFilter = lvl }
+          ) {
+            Text(
+              text = lvl,
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal),
+              color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+          }
+        }
+      }
+      Spacer(modifier = Modifier.height(8.dp))
+    }
+
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      items(questions) { q ->
+      items(displayQuestions) { q ->
         val courseCode = courses.find { it.id == q.courseId }?.code ?: "Course #${q.courseId}"
         Card(
           modifier = Modifier.fillMaxWidth(),
@@ -830,11 +932,58 @@ fun AdminQuestionsView(
 @Composable
 fun AdminExamsView(
   exams: List<ExamEntity>,
+  mockCardConfig: com.example.data.sync.MockCardConfig? = null,
   onAddExam: () -> Unit,
   onDeleteExam: (ExamEntity) -> Unit
 ) {
   Column(modifier = Modifier.fillMaxSize()) {
     Spacer(modifier = Modifier.height(12.dp))
+
+    // Live Mock CBT Session Status Card
+    if (mockCardConfig != null && mockCardConfig.isConfigured) {
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFFCCFBF1).copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, Color(0xFF99F6E4))
+      ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(Icons.Default.Assignment, contentDescription = null, tint = Color(0xFF0F766E), modifier = Modifier.size(18.dp))
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("ACTIVE MOCK CBT SESSION", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFF0F766E))
+            }
+            Surface(
+              shape = RoundedCornerShape(6.dp),
+              color = if (mockCardConfig.revealMode == "DEADLINE") Color(0xFFFEF3C7) else Color(0xFFD1FAE5)
+            ) {
+              Text(
+                text = if (mockCardConfig.revealMode == "DEADLINE") "Scores Withheld" else "Instant Reveal",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                color = if (mockCardConfig.revealMode == "DEADLINE") Color(0xFF92400E) else Color(0xFF065F46),
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+          }
+          Text(
+            text = "${mockCardConfig.courseCode} — ${mockCardConfig.examTitle}",
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            color = Color(0xFF134E4A)
+          )
+          Text(
+            text = "Session: ${mockCardConfig.sessionId.ifBlank { "Session 1" }} • ${mockCardConfig.durationMinutes}m • ${if (mockCardConfig.deadlineString.isNotBlank()) "Deadline: " + mockCardConfig.deadlineString else "Continuous Active Window"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF115E59)
+          )
+        }
+      }
+      Spacer(modifier = Modifier.height(10.dp))
+    }
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -897,9 +1046,41 @@ fun AdminExamsView(
 fun AdminMaterialsView(
   materials: List<StudyMaterialEntity>,
   courses: List<CourseEntity>,
+  currentUser: UserEntity? = null,
   onAddMaterial: () -> Unit,
   onDeleteMaterial: (StudyMaterialEntity) -> Unit
 ) {
+  val isPrimary = currentUser == null ||
+      currentUser.adminRole.equals("PRIMARY", ignoreCase = true) ||
+      currentUser.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+      currentUser.adminRole.isBlank()
+  val secondaryAdminLevel = if (!isPrimary) LevelClassifier.normalizeLevel(currentUser?.assignedCourses?.ifBlank { currentUser?.level }) else null
+
+  var selectedLevelFilter by remember { mutableStateOf("All") }
+  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+
+  val baseMaterials = remember(materials, isPrimary, secondaryAdminLevel) {
+    if (!isPrimary && secondaryAdminLevel != null) {
+      materials.filter { mat ->
+        val courseCode = courses.find { it.id == mat.courseId }?.code
+        LevelClassifier.matchesLevel(secondaryAdminLevel, courseCode)
+      }
+    } else {
+      materials
+    }
+  }
+
+  val displayMaterials = remember(baseMaterials, selectedLevelFilter, isPrimary) {
+    if (isPrimary && selectedLevelFilter != "All") {
+      baseMaterials.filter { mat ->
+        val courseCode = courses.find { it.id == mat.courseId }?.code
+        LevelClassifier.matchesLevel(selectedLevelFilter, courseCode)
+      }
+    } else {
+      baseMaterials
+    }
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     Spacer(modifier = Modifier.height(12.dp))
     Row(
@@ -907,11 +1088,18 @@ fun AdminMaterialsView(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text(
-        text = "Study Materials & Notes",
-        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-        color = MaterialTheme.colorScheme.onSurface
-      )
+      Column {
+        Text(
+          text = if (isPrimary) "Study Materials & Notes (${displayMaterials.size} of ${materials.size})" else "Study Materials: $secondaryAdminLevel (${displayMaterials.size})",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+          text = if (isPrimary) "Alpha Admin Oversight — All levels" else "Secondary Admin: Level $secondaryAdminLevel",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+      }
       Button(
         onClick = onAddMaterial,
         shape = RoundedCornerShape(8.dp)
@@ -924,11 +1112,35 @@ fun AdminMaterialsView(
 
     Spacer(modifier = Modifier.height(10.dp))
 
+    if (isPrimary) {
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        items(levelOptions) { lvl ->
+          val isSelected = selectedLevelFilter == lvl
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.clickable { selectedLevelFilter = lvl }
+          ) {
+            Text(
+              text = lvl,
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal),
+              color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+          }
+        }
+      }
+      Spacer(modifier = Modifier.height(8.dp))
+    }
+
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      items(materials) { mat ->
+      items(displayMaterials) { mat ->
         val courseCode = courses.find { it.id == mat.courseId }?.code ?: "Course #${mat.courseId}"
         Card(
           modifier = Modifier.fillMaxWidth(),
@@ -1416,19 +1628,38 @@ fun AdminAcademicSetupView(
 @Composable
 fun AdminStudentsView(
   students: List<UserEntity>,
-  onRefresh: (() -> Unit)? = null
+  currentUser: UserEntity? = null,
+  onRefresh: (() -> Unit)? = null,
+  onPromoteToAdmin: ((UserEntity) -> Unit)? = null
 ) {
   var searchQuery by remember { mutableStateOf("") }
   var selectedLevelFilter by remember { mutableStateOf("All") }
   val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
 
-  val filteredStudents = remember(students, searchQuery, selectedLevelFilter) {
-    students.filter { s ->
+  val isPrimary = currentUser == null ||
+      currentUser.adminRole.equals("PRIMARY", ignoreCase = true) ||
+      currentUser.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+      currentUser.adminRole.isBlank()
+
+  val secondaryAdminLevel = if (!isPrimary) {
+    LevelClassifier.normalizeLevel(currentUser?.assignedCourses?.ifBlank { currentUser?.level })
+  } else null
+
+  val baseStudents = remember(students, isPrimary, secondaryAdminLevel) {
+    if (!isPrimary && secondaryAdminLevel != null) {
+      students.filter { LevelClassifier.matchesLevel(secondaryAdminLevel, it.level) }
+    } else {
+      students
+    }
+  }
+
+  val filteredStudents = remember(baseStudents, searchQuery, selectedLevelFilter, isPrimary) {
+    baseStudents.filter { s ->
       val matchesSearch = searchQuery.isBlank() ||
         s.fullName.contains(searchQuery, ignoreCase = true) ||
         s.email.contains(searchQuery, ignoreCase = true) ||
         s.phoneNumber.contains(searchQuery, ignoreCase = true)
-      val matchesLevel = selectedLevelFilter == "All" || s.level.contains(selectedLevelFilter, ignoreCase = true)
+      val matchesLevel = (!isPrimary) || selectedLevelFilter == "All" || LevelClassifier.matchesLevel(selectedLevelFilter, s.level)
       matchesSearch && matchesLevel
     }
   }
@@ -1442,12 +1673,12 @@ fun AdminStudentsView(
     ) {
       Column {
         Text(
-          text = "Enrolled Students (${students.size})",
+          text = if (isPrimary) "Enrolled Students (${filteredStudents.size} of ${students.size})" else "Enrolled Students: $secondaryAdminLevel (${filteredStudents.size})",
           style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
           color = MaterialTheme.colorScheme.onSurface
         )
         Text(
-          text = "Real-time records deposited in database users list",
+          text = if (isPrimary) "Alpha Admin Oversight — Real-time database users" else "Secondary Admin Scope: $secondaryAdminLevel",
           style = MaterialTheme.typography.labelSmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -1487,25 +1718,40 @@ fun AdminStudentsView(
 
     Spacer(modifier = Modifier.height(8.dp))
 
-    // Level filter row
-    LazyRow(
-      horizontalArrangement = Arrangement.spacedBy(6.dp),
-      modifier = Modifier.fillMaxWidth()
-    ) {
-      items(levelOptions) { lvl ->
-        val isSelected = selectedLevelFilter == lvl
-        Surface(
-          shape = RoundedCornerShape(8.dp),
-          color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-          modifier = Modifier.clickable { selectedLevelFilter = lvl }
-        ) {
-          Text(
-            text = lvl,
-            style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal),
-            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-          )
+    // Level filter row (Primary Admin sees all levels; Secondary Admin sees their assigned scope badge)
+    if (isPrimary) {
+      LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        items(levelOptions) { lvl ->
+          val isSelected = selectedLevelFilter == lvl
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.clickable { selectedLevelFilter = lvl }
+          ) {
+            Text(
+              text = lvl,
+              style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal),
+              color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+          }
         }
+      }
+    } else {
+      Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        Text(
+          text = "Showing only $secondaryAdminLevel students assigned to you",
+          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+          color = MaterialTheme.colorScheme.onPrimaryContainer,
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        )
       }
     }
 
@@ -1570,16 +1816,32 @@ fun AdminStudentsView(
                 }
               }
 
-              Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = if (s.isPremium) Color(0xFFFEF3C7) else SuccessGreen.copy(alpha = 0.12f)
-              ) {
-                Text(
-                  text = if (s.isPremium) "PREMIUM" else "STUDENT",
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                  color = if (s.isPremium) Color(0xFF92400E) else SuccessGreen,
-                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
+              Column(horizontalAlignment = Alignment.End) {
+                Surface(
+                  shape = RoundedCornerShape(6.dp),
+                  color = if (s.isPremium) Color(0xFFFEF3C7) else SuccessGreen.copy(alpha = 0.12f)
+                ) {
+                  Text(
+                    text = if (s.isPremium) "PREMIUM" else "STUDENT",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = if (s.isPremium) Color(0xFF92400E) else SuccessGreen,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                  )
+                }
+
+                if (onPromoteToAdmin != null) {
+                  Spacer(modifier = Modifier.height(6.dp))
+                  OutlinedButton(
+                    onClick = { onPromoteToAdmin(s) },
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(28.dp)
+                  ) {
+                    Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Make Admin", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp), color = MaterialTheme.colorScheme.primary)
+                  }
+                }
               }
             }
           }
@@ -2385,18 +2647,24 @@ fun EditLibraryDialog(
   )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddSecondaryAdminDialog(
   courses: List<CourseEntity>,
+  students: List<UserEntity> = emptyList(),
+  preSelectedStudent: UserEntity? = null,
   onDismiss: () -> Unit,
   onSave: (fullName: String, email: String, phone: String, pass: String, permissions: String, assignedCourses: String, onComplete: (Boolean, String?) -> Unit) -> Unit
 ) {
-  var fullName by remember { mutableStateOf("") }
-  var email by remember { mutableStateOf("") }
-  var phone by remember { mutableStateOf("") }
+  var selectedStudent by remember { mutableStateOf(preSelectedStudent) }
+  var fullName by remember { mutableStateOf(preSelectedStudent?.fullName ?: "") }
+  var email by remember { mutableStateOf(preSelectedStudent?.email ?: "") }
+  var phone by remember { mutableStateOf(preSelectedStudent?.phoneNumber ?: "") }
   var password by remember { mutableStateOf("") }
   var assignedCourses by remember { mutableStateOf("RAD 101") }
   var errorMessage by remember { mutableStateOf<String?>(null) }
+  var studentDropdownExpanded by remember { mutableStateOf(false) }
+  var studentSearchQuery by remember { mutableStateOf("") }
 
   var permMaterials by remember { mutableStateOf(true) }
   var permQuestions by remember { mutableStateOf(true) }
@@ -2404,20 +2672,218 @@ fun AddSecondaryAdminDialog(
   var permLibraries by remember { mutableStateOf(true) }
   var permExams by remember { mutableStateOf(true) }
 
+  val nonAdminStudents = remember(students, studentSearchQuery) {
+    val q = studentSearchQuery.trim()
+    students.filter { s ->
+      s.role != "ADMIN" && (
+        q.isBlank() ||
+        s.fullName.contains(q, ignoreCase = true) ||
+        s.email.contains(q, ignoreCase = true) ||
+        s.phoneNumber.contains(q, ignoreCase = true)
+      )
+    }
+  }
+
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Create Secondary Admin", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+    title = {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Security, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = if (selectedStudent != null) "Promote User to Admin" else "Create Secondary Admin",
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+        )
+      }
+    },
     text = {
       Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        OutlinedTextField(value = fullName, onValueChange = { fullName = it }, label = { Text("Full Name (e.g. Dr. John Doe)") }, modifier = Modifier.fillMaxWidth())
+        Text(
+          text = "Select from Registered Database Users:",
+          style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+          color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+
+        if (selectedStudent != null) {
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(10.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = "Selected: ${selectedStudent!!.fullName}",
+                  style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                  text = "${selectedStudent!!.email} • ${selectedStudent!!.department} • ${selectedStudent!!.level}",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+              IconButton(
+                onClick = {
+                  selectedStudent = null
+                  fullName = ""
+                  email = ""
+                  phone = ""
+                },
+                modifier = Modifier.size(28.dp)
+              ) {
+                Icon(Icons.Default.Close, contentDescription = "Clear selection", modifier = Modifier.size(16.dp))
+              }
+            }
+          }
+        } else {
+          ExposedDropdownMenuBox(
+            expanded = studentDropdownExpanded,
+            onExpandedChange = { studentDropdownExpanded = it }
+          ) {
+            OutlinedTextField(
+              value = studentSearchQuery.ifBlank { "Tap to select user (${students.size} registered)" },
+              onValueChange = {
+                studentSearchQuery = it
+                studentDropdownExpanded = true
+              },
+              label = { Text("Search / Pick User from List") },
+              trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = studentDropdownExpanded) },
+              modifier = Modifier.fillMaxWidth().menuAnchor(),
+              singleLine = true
+            )
+            ExposedDropdownMenu(
+              expanded = studentDropdownExpanded,
+              onDismissRequest = { studentDropdownExpanded = false }
+            ) {
+              if (nonAdminStudents.isEmpty()) {
+                DropdownMenuItem(
+                  text = { Text("No matching registered users found") },
+                  onClick = { studentDropdownExpanded = false }
+                )
+              } else {
+                nonAdminStudents.take(25).forEach { st ->
+                  DropdownMenuItem(
+                    text = {
+                      Column {
+                        Text(st.fullName, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                        Text(
+                          "${st.email} • ${st.department} • ${st.level}",
+                          style = MaterialTheme.typography.labelSmall,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                      }
+                    },
+                    onClick = {
+                      selectedStudent = st
+                      fullName = st.fullName
+                      email = st.email
+                      phone = st.phoneNumber
+                      studentDropdownExpanded = false
+                      studentSearchQuery = ""
+                    }
+                  )
+                }
+              }
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        OutlinedTextField(
+          value = fullName,
+          onValueChange = { fullName = it },
+          label = { Text("Full Name (e.g. Dr. John Doe)") },
+          modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("University Email") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+          value = email,
+          onValueChange = { email = it },
+          label = { Text("University Email") },
+          modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone Number") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+          value = phone,
+          onValueChange = { phone = it },
+          label = { Text("Phone Number") },
+          modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Temporary Password") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+          value = password,
+          onValueChange = { password = it },
+          label = {
+            Text(
+              if (selectedStudent != null || students.any { it.email.equals(email.trim(), ignoreCase = true) })
+                "Password (Optional - leave blank to keep user's password)"
+              else "Temporary Password (min 6 chars)"
+            )
+          },
+          modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(value = assignedCourses, onValueChange = { assignedCourses = it }, label = { Text("Assigned Courses (e.g. RAD 101, PHY 101)") }, modifier = Modifier.fillMaxWidth())
+        Text("Academic Level Assignment:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+        Spacer(modifier = Modifier.height(4.dp))
+        val adminLevels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "All Levels")
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          adminLevels.take(3).forEach { lvl ->
+            val isSel = assignedCourses.contains(lvl, ignoreCase = true)
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+              modifier = Modifier.clickable { assignedCourses = lvl }
+            ) {
+              Text(
+                text = lvl,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal),
+                color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              )
+            }
+          }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          adminLevels.drop(3).forEach { lvl ->
+            val isSel = assignedCourses.contains(lvl, ignoreCase = true)
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+              modifier = Modifier.clickable { assignedCourses = lvl }
+            ) {
+              Text(
+                text = lvl,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal),
+                color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+              )
+            }
+          }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+          value = assignedCourses,
+          onValueChange = { assignedCourses = it },
+          label = { Text("Assigned Level & Courses (e.g. 100 Level, RAD 101)") },
+          modifier = Modifier.fillMaxWidth()
+        )
         Spacer(modifier = Modifier.height(10.dp))
 
         Text("Assigned Permissions:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
@@ -2458,7 +2924,10 @@ fun AddSecondaryAdminDialog(
     confirmButton = {
       Button(
         onClick = {
-          if (fullName.isNotBlank() && email.isNotBlank() && password.length >= 6) {
+          val isExisting = selectedStudent != null || students.any { it.email.equals(email.trim(), ignoreCase = true) }
+          val passValid = if (isExisting) (password.isBlank() || password.length >= 6) else (password.length >= 6)
+
+          if (fullName.isNotBlank() && email.isNotBlank() && passValid) {
             val perms = mutableListOf<String>()
             if (permMaterials) perms.add("materials")
             if (permQuestions) perms.add("questions")
@@ -2468,16 +2937,20 @@ fun AddSecondaryAdminDialog(
 
             onSave(fullName.trim(), email.trim(), phone.trim(), password.trim(), perms.joinToString(","), assignedCourses.trim()) { success, err ->
               if (!success) {
-                errorMessage = err ?: "Failed to create secondary admin."
+                errorMessage = err ?: "Failed to configure administrator account."
               }
             }
           } else {
-            errorMessage = "Please fill all fields and enter a password of at least 6 characters."
+            errorMessage = if (!passValid) {
+              "Password must be at least 6 characters."
+            } else {
+              "Please provide full name and university email address."
+            }
           }
         },
         shape = RoundedCornerShape(8.dp)
       ) {
-        Text("Create Admin")
+        Text(if (selectedStudent != null || students.any { it.email.equals(email.trim(), ignoreCase = true) }) "Promote to Admin" else "Create Admin")
       }
     },
     dismissButton = {

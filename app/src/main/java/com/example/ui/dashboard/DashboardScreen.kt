@@ -45,13 +45,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,6 +82,7 @@ import com.example.ui.theme.TextMuted
 import com.example.ui.theme.TextSecondarySlate
 import com.example.ui.theme.WarningAmber
 import com.example.ui.viewmodel.DashboardViewModel
+import com.example.data.util.LevelClassifier
 import java.text.SimpleDateFormat
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -115,6 +121,202 @@ fun DashboardScreen(
 
   val greeting = rememberGreeting()
   val firstName = user.fullName.split(" ").firstOrNull() ?: user.fullName
+  var pendingMockExam by remember { mutableStateOf<ExamEntity?>(null) }
+
+  if (pendingMockExam != null) {
+    val exam = pendingMockExam!!
+    val isDeadlinePassed = mockCard.deadlineTimestamp > 0L && System.currentTimeMillis() >= mockCard.deadlineTimestamp
+    val existingAttempt = recentAttempts.firstOrNull { att ->
+      att.examId == exam.id ||
+      (att.examTitle.equals(exam.title, ignoreCase = true) && (mockCard.courseCode.isBlank() || att.courseTitle.contains(mockCard.courseCode, ignoreCase = true)))
+    }
+    val isAlreadyAttempted = existingAttempt != null
+
+    AlertDialog(
+      onDismissRequest = { pendingMockExam = null },
+      icon = {
+        Surface(
+          shape = CircleShape,
+          color = when {
+            isAlreadyAttempted -> Color(0xFF0F766E).copy(alpha = 0.15f)
+            isDeadlinePassed -> Color(0xFFEF4444).copy(alpha = 0.12f)
+            else -> Color(0xFF0F766E).copy(alpha = 0.12f)
+          },
+          modifier = Modifier.size(52.dp)
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = when {
+                isAlreadyAttempted -> Icons.Default.CheckCircle
+                isDeadlinePassed -> Icons.Default.Lock
+                else -> Icons.Default.Assignment
+              },
+              contentDescription = null,
+              tint = if (isDeadlinePassed && !isAlreadyAttempted) Color(0xFFEF4444) else Color(0xFF0F766E),
+              modifier = Modifier.size(28.dp)
+            )
+          }
+        }
+      },
+      title = {
+        Text(
+          text = when {
+            isAlreadyAttempted -> "Examination Already Completed"
+            isDeadlinePassed -> "Mock CBT Session Closed"
+            else -> "Ready to Begin Examination?"
+          },
+          style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+          textAlign = TextAlign.Center,
+          modifier = Modifier.fillMaxWidth()
+        )
+      },
+      text = {
+        Column(
+          modifier = Modifier.fillMaxWidth(),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+            border = BorderStroke(1.dp, BorderSubtle),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text(
+                text = exam.title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+              )
+              Text(
+                text = "Course: ${mockCard.courseCode.ifBlank { exam.title }} • ${mockCard.courseTitle}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Text(
+                text = "Live Session: ${mockCard.sessionId.ifBlank { "Session 1" }}",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = ProfessionalBlue
+              )
+              Text(
+                text = "Duration: ${exam.durationMinutes} Minutes (Strict Auto-Submit)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Text(
+                text = "Questions: ${exam.totalQuestions} Departmental Questions",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              if (mockCard.deadlineString.isNotBlank()) {
+                Text(
+                  text = "Session Deadline: ${mockCard.deadlineString}",
+                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                  color = if (isDeadlinePassed) Color(0xFFEF4444) else Color(0xFFB45309)
+                )
+              }
+            }
+          }
+
+          Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+              Text(
+                text = "Candidate: ${user.fullName}",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+              )
+              Text(
+                text = "ID / Phone: ${user.phoneNumber.ifBlank { user.email }} • Level: ${user.level}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+            }
+          }
+
+          if (isAlreadyAttempted && existingAttempt != null) {
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = Color(0xFF0F766E).copy(alpha = 0.12f),
+              border = BorderStroke(1.dp, Color(0xFF0F766E).copy(alpha = 0.35f)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                  text = "Score Achieved: ${existingAttempt.score}%",
+                  style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                  color = Color(0xFF0F766E)
+                )
+                Text(
+                  text = "One Attempt Rule: You have already submitted your official examination for this session. Review your official grading and answers below.",
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+              }
+            }
+          } else if (isDeadlinePassed) {
+            Surface(
+              shape = RoundedCornerShape(8.dp),
+              color = Color(0xFFEF4444).copy(alpha = 0.1f),
+              border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.3f)),
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              Text(
+                text = "This examination session has closed. Submissions are no longer accepted for this session.",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                color = Color(0xFFDC2626),
+                modifier = Modifier.padding(10.dp)
+              )
+            }
+          } else {
+            Text(
+              text = "• One-Attempt Rule: You can take this examination once per session.\n• Anti-Cheating & Exam Lockdown: Leaving the exam window or switching apps will immediately terminate and submit your test.\n• Strict Deadline & Duration: Once started, the timer runs continuously.\n• Your score is logged securely on the departmental score sheet.",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+        }
+      },
+      confirmButton = {
+        if (isAlreadyAttempted && existingAttempt != null) {
+          Button(
+            onClick = {
+              val attemptId = existingAttempt.id
+              pendingMockExam = null
+              onNavigateToResults(attemptId)
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.testTag("view_mock_result_btn")
+          ) {
+            Text("View Official Result")
+          }
+        } else if (!isDeadlinePassed) {
+          Button(
+            onClick = {
+              val current = pendingMockExam
+              pendingMockExam = null
+              if (current != null) {
+                onStartExam(current)
+              }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.testTag("start_mock_exam_btn")
+          ) {
+            Text("Begin Examination")
+          }
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { pendingMockExam = null }) {
+          Text(if (isDeadlinePassed || isAlreadyAttempted) "Close" else "Cancel")
+        }
+      }
+    )
+  }
 
   Surface(
     modifier = Modifier.fillMaxSize(),
@@ -347,7 +549,7 @@ fun DashboardScreen(
         horizontalArrangement = Arrangement.spacedBy(12.dp)
       ) {
         // Taller Left Card: Active Department Practice Course or "Coming Soon..."
-        if (practiceCard.isConfigured && practiceCard.courseId > 0L) {
+        if (practiceCard.isConfigured && practiceCard.courseId > 0L && LevelClassifier.matchesUserLevel(user, practiceCard.courseCode, null)) {
           Surface(
             modifier = Modifier
               .weight(1f)
@@ -501,25 +703,31 @@ fun DashboardScreen(
           modifier = Modifier.weight(1f),
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-          // Card: Mock Exams (Soft Teal or configured Course or Coming soon)
-          if (mockCard.isConfigured && mockCard.courseId > 0L) {
+          // Card: Mock Exams (Filtered strictly to student's academic level)
+          val isMockCardLevelMatch = mockCard.isConfigured && (mockCard.courseId > 0L || mockCard.questionIds.isNotEmpty()) && LevelClassifier.matchesUserLevel(user, mockCard.courseCode, null)
+          val levelMatchingExams = activeExams.filter { LevelClassifier.matchesUserLevel(user, it.title, null) }
+          val isMockActive = isMockCardLevelMatch || levelMatchingExams.isNotEmpty()
+
+          if (isMockActive) {
+            val resolvedCourseId = if (isMockCardLevelMatch && mockCard.courseId > 0L) mockCard.courseId else (levelMatchingExams.firstOrNull()?.courseId ?: 1L)
             Surface(
               modifier = Modifier
                 .fillMaxWidth()
                 .height(90.dp)
                 .clickable {
-                  val exam = activeExams.find { it.id == mockCard.examId }
-                    ?: activeExams.find { it.courseId == mockCard.courseId }
+                  val exam = levelMatchingExams.find { it.id == mockCard.examId }
+                    ?: levelMatchingExams.find { it.courseId == resolvedCourseId }
+                    ?: levelMatchingExams.firstOrNull()
                     ?: ExamEntity(
                       id = mockCard.examId.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                      courseId = mockCard.courseId,
-                      title = mockCard.examTitle.ifBlank { "${mockCard.courseCode} Mock CBT" },
+                      courseId = resolvedCourseId,
+                      title = mockCard.examTitle.ifBlank { "${mockCard.courseCode.ifBlank { "ANA 201" }} Mock CBT" },
                       description = "Official departmental timed CBT examination simulation.",
-                      durationMinutes = mockCard.durationMinutes,
-                      totalQuestions = mockCard.questionCount,
+                      durationMinutes = if (mockCard.durationMinutes > 0) mockCard.durationMinutes else 30,
+                      totalQuestions = if (mockCard.questionCount > 0) mockCard.questionCount else 15,
                       isPublished = true
                     )
-                  onStartExam(exam)
+                  pendingMockExam = exam
                 },
               shape = RoundedCornerShape(18.dp),
               color = Color(0xFFCCFBF1), // Soft teal
@@ -540,7 +748,7 @@ fun DashboardScreen(
                     maxLines = 1
                   )
                   Text(
-                    text = "${mockCard.courseCode} • ${mockCard.durationMinutes}m Timed",
+                    text = "${if (isMockCardLevelMatch) mockCard.courseCode else (levelMatchingExams.firstOrNull()?.title ?: user.level)} • ${mockCard.durationMinutes}m Timed",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF115E59)
                   )
@@ -580,7 +788,7 @@ fun DashboardScreen(
                     color = MaterialTheme.colorScheme.onSurface
                   )
                   Text(
-                    text = "Coming soon..",
+                    text = "Coming soon for ${user.level}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                   )
@@ -591,12 +799,7 @@ fun DashboardScreen(
                   modifier = Modifier.size(28.dp)
                 ) {
                   Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                      Icons.Default.Lock,
-                      contentDescription = "Coming Soon",
-                      tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                      modifier = Modifier.size(14.dp)
-                    )
+                    Icon(Icons.Default.Lock, contentDescription = "Coming Soon", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
                   }
                 }
               }

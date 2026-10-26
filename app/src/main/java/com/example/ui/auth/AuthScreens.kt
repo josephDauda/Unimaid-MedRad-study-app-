@@ -525,7 +525,7 @@ fun RegisterScreen(
   var passwordVisible by remember { mutableStateOf(false) }
 
   val levels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
-  var selectedLevel by remember { mutableStateOf(levels.first()) }
+  var selectedLevel by remember { mutableStateOf(levels.getOrElse(1) { "200 Level" }) }
   var levelMenuExpanded by remember { mutableStateOf(false) }
 
   val department = "Medical Radiography" // Default department per requirement
