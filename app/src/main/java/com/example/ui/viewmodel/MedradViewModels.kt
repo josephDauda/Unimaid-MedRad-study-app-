@@ -286,7 +286,8 @@ data class CbtSessionState(
   val deadlineString: String = "",
   val deadlineTimestamp: Long = 0L,
   val sessionId: String = "Session 1",
-  val isDeadlineExpired: Boolean = false
+  val isDeadlineExpired: Boolean = false,
+  val isAlreadyAttempted: Boolean = false
 )
 
 class CbtViewModel(
@@ -330,7 +331,7 @@ class CbtViewModel(
       val title = if (!customTitle.isNullOrBlank() && !customTitle.contains(courseId.toString())) {
         customTitle
       } else {
-        course?.title ?: "GROSS ANATOMY OF UPPER AND LOWER LIMBS"
+        course?.title ?: "${user.level} Practice Session"
       }
 
       // Pull latest questions from cloud if network is available
@@ -340,25 +341,30 @@ class CbtViewModel(
 
       var questions = if (specificQuestionIds.isNotEmpty()) {
         val specific = cbtRepository.getQuestionsByIds(specificQuestionIds)
-        if (specific.isNotEmpty()) specific else cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
+        if (specific.isNotEmpty()) specific else cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount, user.level)
       } else {
-        cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount)
+        cbtRepository.getPracticeQuestions(effectiveCourseId, questionCount, user.level)
       }
 
       if (questions.isEmpty()) {
-        val fallback = cbtRepository.getExamQuestions(effectiveCourseId, questionCount, allowDepartmentalFallback = true)
+        val fallback = cbtRepository.getExamQuestions(
+          courseId = effectiveCourseId,
+          totalQuestions = questionCount,
+          allowDepartmentalFallback = true,
+          studentLevel = user.level
+        )
         val levelFiltered = fallback.filter { q ->
           val parentCourse = academicRepository?.getCourseById(q.courseId)
           LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
         }
-        questions = if (levelFiltered.isNotEmpty()) levelFiltered else fallback
+        questions = levelFiltered
         if (questions.isEmpty()) {
           val allPublished = academicRepository?.getAllQuestionsList()?.filter { it.isPublished } ?: emptyList()
           val levelMatching = allPublished.filter { q ->
             val parentCourse = academicRepository?.getCourseById(q.courseId)
             LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
           }
-          questions = if (levelMatching.isNotEmpty()) levelMatching.take(questionCount) else allPublished.take(questionCount)
+          questions = levelMatching.take(questionCount)
         }
       }
 
@@ -414,13 +420,43 @@ class CbtViewModel(
         return@launch
       }
 
+      val course = academicRepository?.getCourseById(exam.courseId)
+      val code = course?.code ?: mockConfig.courseCode.ifBlank { "${user.level} CBT" }
+      val title = course?.title ?: mockConfig.courseTitle.ifBlank { "${user.level} Mock Examination" }
+      val displayExamTitle = if (exam.title.isNotBlank()) exam.title else mockConfig.examTitle.ifBlank { "$code — $title Mock Exam" }
+
+      // 0. Database-enforced Single Attempt Policy: Prevent candidate retakes once submitted
+      val existingAttempt = cbtRepository.getExistingAttemptForUserAndExam(
+        userId = user.id,
+        examId = exam.id.takeIf { it > 0 },
+        examTitle = displayExamTitle,
+        courseCode = code
+      )
+      if (existingAttempt != null) {
+        _sessionState.value = CbtSessionState(
+          isExamMode = true,
+          examId = exam.id,
+          examTitle = displayExamTitle,
+          courseTitle = "$code — $title",
+          isSubmitted = true,
+          isAlreadyAttempted = true,
+          submittedAttemptId = existingAttempt.id,
+          isLoading = false
+        )
+        return@launch
+      }
+
       val durationSecs = if (exam.durationMinutes > 0) exam.durationMinutes * 60 else maxOf(30, mockConfig.durationMinutes) * 60
 
       // 2. Resolve questions: Check specificQuestionIds parameter, then mockConfig.questionIds, then exam / course questions with departmental fallback
       val targetIds = if (specificQuestionIds.isNotEmpty()) specificQuestionIds else mockConfig.questionIds
       var resolvedQuestions: List<QuestionEntity> = if (targetIds.isNotEmpty()) {
         val specific = cbtRepository.getQuestionsByIds(targetIds)
-        if (specific.isNotEmpty()) specific else emptyList()
+        val matchingSpecific = specific.filter { q ->
+          val parentCourse = academicRepository?.getCourseById(q.courseId)
+          LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
+        }
+        matchingSpecific
       } else {
         emptyList()
       }
@@ -431,17 +467,16 @@ class CbtViewModel(
           courseId = exam.courseId,
           totalQuestions = qLimit,
           examRemoteId = exam.remoteId,
-          allowDepartmentalFallback = true
+          allowDepartmentalFallback = true,
+          studentLevel = user.level
         )
-        // Strictly filter candidate questions to the student's registered level so Level 100 and Level 200 concurrent exams never mix
+        // Strictly filter candidate questions to the student's registered level so Level 100, 200, 300, 400, 500, 600 concurrent exams never mix
         val levelMatchingExamQ = examQuestions.filter { q ->
           val parentCourse = academicRepository?.getCourseById(q.courseId)
           LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
         }
         resolvedQuestions = if (levelMatchingExamQ.isNotEmpty()) {
           levelMatchingExamQ
-        } else if (examQuestions.isNotEmpty()) {
-          examQuestions
         } else {
           // If no questions specific to this course ID, pull from published questions bank strictly matching candidate's level
           val allQ = academicRepository?.getAllQuestionsList() ?: emptyList()
@@ -451,17 +486,10 @@ class CbtViewModel(
           if (levelMatchingBank.isNotEmpty()) {
             levelMatchingBank.take(qLimit)
           } else {
-            val published = allQ.filter { it.isPublished }
-            if (published.isNotEmpty()) published.take(qLimit) else allQ.take(qLimit)
+            emptyList()
           }
         }
       }
-
-      val course = academicRepository?.getCourseById(exam.courseId)
-      val code = course?.code ?: mockConfig.courseCode.ifBlank { "ANA 201" }
-      val title = course?.title ?: mockConfig.courseTitle.ifBlank { "GROSS ANATOMY OF UPPER AND LOWER LIMBS" }
-
-      val displayExamTitle = if (exam.title.isNotBlank()) exam.title else mockConfig.examTitle.ifBlank { "$code — $title Mock Exam" }
 
       _sessionState.value = CbtSessionState(
         isExamMode = true,

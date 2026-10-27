@@ -125,6 +125,12 @@ interface ExamDao {
   @Query("SELECT * FROM exam_attempts WHERE remoteId = :remoteId LIMIT 1")
   suspend fun getAttemptByRemoteId(remoteId: String): ExamAttemptEntity?
 
+  @Query("SELECT * FROM exam_attempts WHERE userId = :userId AND examId = :examId LIMIT 1")
+  suspend fun getAttemptByUserIdAndExamId(userId: Long, examId: Long): ExamAttemptEntity?
+
+  @Query("SELECT * FROM exam_attempts WHERE userId = :userId ORDER BY timestamp DESC")
+  suspend fun getAttemptsForUserList(userId: Long): List<ExamAttemptEntity>
+
   @Query("SELECT COUNT(*) FROM exam_attempts")
   suspend fun getTotalAttemptsCount(): Int
 

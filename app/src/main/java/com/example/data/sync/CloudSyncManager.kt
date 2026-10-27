@@ -39,6 +39,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import com.example.data.util.LevelClassifier
 
 data class CloudAnnouncement(
   val id: String = "",
@@ -553,7 +554,7 @@ class CloudSyncManager(
             val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
             val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
             val localExamId = localExam?.id ?: parseJsonId(record, "exam_id", 0L)
-            val localCourseId = localExam?.courseId ?: localCourse?.id ?: 1L
+            val localCourseId = localExam?.courseId ?: localCourse?.id ?: 0L
             val studentUuid = record.optString("student_id").ifBlank { record.optString("user_id") }
             val localUser = if (studentUuid.isNotBlank()) database.userDao().getUserByEmail(studentUuid) else null
             val localUserId = localUser?.id ?: FlexibleIdHelper.toPositiveLong(studentUuid, 1L)
@@ -909,7 +910,7 @@ class CloudSyncManager(
             role = resolvedRole,
             department = p.department ?: existing.department,
             faculty = p.faculty ?: existing.faculty,
-            level = p.level ?: existing.level,
+            level = if (!p.level.isNullOrBlank()) LevelClassifier.normalizeLevel(p.level) else existing.level,
             isActive = p.isActive,
             isPremium = if (resolvedRole == "ADMIN") true else existing.isPremium
           )
@@ -1200,13 +1201,21 @@ class CloudSyncManager(
             remoteQuestionUuids.add(remoteUuid)
             val examRemoteId = q.examId?.toString()
             val courseRemoteId = q.courseId?.toString()
-            val localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
+            var localCourse = courseRemoteId?.let { database.academicDao().getCourseByRemoteId(it) }
               ?: courseRemoteId?.let { database.academicDao().getCourseByCode(it) }
               ?: (examRemoteId?.let { database.examDao().getExamByRemoteId(it)?.courseId })?.let { database.academicDao().getCourseById(it) }
               ?: (courseId?.let { database.academicDao().getCourseById(it) })
-              ?: database.academicDao().getCoursesList().firstOrNull()
+
+            if (localCourse == null) {
+              val combinedText = "${q.questionText.orEmpty()} ${q.explanation.orEmpty()}"
+              val detectedLevel = LevelClassifier.getLevelFromCourseCode(combinedText)
+              val allCourses = database.academicDao().getCoursesList()
+              localCourse = if (detectedLevel != null) {
+                allCourses.firstOrNull { LevelClassifier.matchesLevel(detectedLevel, it.code) || LevelClassifier.matchesLevel(detectedLevel, it.level) }
+              } else null
+            }
             val localExam = examRemoteId?.let { database.examDao().getExamByRemoteId(it) }
-            val localCourseId = localCourse?.id ?: localExam?.courseId ?: courseId ?: 1L
+            val localCourseId = localCourse?.id ?: localExam?.courseId ?: courseId ?: 0L
             val existing = database.questionDao().getQuestionByRemoteId(remoteUuid)
             val localId = existing?.id ?: FlexibleIdHelper.toPositiveLong(q.id, 0L)
 

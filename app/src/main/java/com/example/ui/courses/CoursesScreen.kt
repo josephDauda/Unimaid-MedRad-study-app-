@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -118,26 +120,33 @@ fun CoursesScreen(
   val allCourses by academicRepository.getAllCourses().collectAsState(initial = emptyList())
   val courses = remember(allCourses, user.level, user.role, user.adminRole) {
     if (user.role == "ADMIN") {
-      allCourses
+      val isPrimary = user.adminRole.equals("PRIMARY", ignoreCase = true) ||
+          user.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+          user.adminRole.isBlank()
+      if (isPrimary) {
+        allCourses
+      } else {
+        allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
+      }
     } else {
-      val levelFiltered = allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
-      if (levelFiltered.isNotEmpty()) levelFiltered else allCourses
+      allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
     }
   }
 
   var selectedCourseId by remember { mutableStateOf<Long?>(null) }
   val activeCourse = courses.find { it.id == selectedCourseId } ?: courses.firstOrNull()
+  val activeCourseId = activeCourse?.id ?: -1L
 
-  // Collect data specific to active course
-  val courseTopics by academicRepository.getTopicsByCourse(activeCourse?.id ?: 1L)
+  // Collect data specific to active course (defaults to -1L when empty so no other level is pulled)
+  val courseTopics by academicRepository.getTopicsByCourse(activeCourseId)
     .collectAsState(initial = emptyList())
-  val courseMaterials by academicRepository.getMaterialsForCourse(activeCourse?.id ?: 1L)
+  val courseMaterials by academicRepository.getMaterialsForCourse(activeCourseId)
     .collectAsState(initial = emptyList())
-  val courseQuestions by academicRepository.getQuestionsForCourse(activeCourse?.id ?: 1L)
+  val courseQuestions by academicRepository.getQuestionsForCourse(activeCourseId)
     .collectAsState(initial = emptyList())
-  val courseExams by academicRepository.getExamsForCourse(activeCourse?.id ?: 1L)
+  val courseExams by academicRepository.getExamsForCourse(activeCourseId)
     .collectAsState(initial = emptyList())
-  val courseLibraries by academicRepository.getLibrariesForCourse(activeCourse?.id ?: 1L)
+  val courseLibraries by academicRepository.getLibrariesForCourse(activeCourseId)
     .collectAsState(initial = emptyList())
 
   // Internal tab state: 0 -> Materials, 1 -> Handouts, 2 -> Question Bank & Quizzes, 3 -> Google Drive Libraries, 4 -> Syllabus Topics
@@ -171,7 +180,7 @@ fun CoursesScreen(
               color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-              text = activeCourse?.let { "${it.code} — ${it.title}" } ?: "Departmental Courses",
+              text = activeCourse?.let { "${it.code} — ${it.title}" } ?: "${user.level} Academic Hub",
               style = MaterialTheme.typography.labelSmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -255,116 +264,176 @@ fun CoursesScreen(
         }
       }
 
-      // 2. Course Selection Carousel (RAD 101, PHY 101, BIO 101, etc.)
-      Text(
-        text = "Select Course Hub",
-        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-      )
-
-      LazyRow(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(horizontal = 12.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        items(courses) { course ->
-          val isSelected = (course.id == (activeCourse?.id ?: -1L))
-          Surface(
-            onClick = {
-              selectedCourseId = course.id
-            },
-            shape = RoundedCornerShape(12.dp),
-            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-            border = BorderStroke(
-              width = if (isSelected) 1.5.dp else 1.dp,
-              color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-            ),
-            modifier = Modifier.height(48.dp)
+      if (courses.isEmpty()) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+          contentAlignment = Alignment.Center
+        ) {
+          Card(
+            modifier = Modifier
+              .fillMaxWidth()
+              .widthIn(max = 480.dp),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
           ) {
-            Row(
-              modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-              verticalAlignment = Alignment.CenterVertically
+            Column(
+              modifier = Modifier.padding(28.dp),
+              horizontalAlignment = Alignment.CenterHorizontally
             ) {
               Box(
                 modifier = Modifier
-                  .size(28.dp)
+                  .size(64.dp)
                   .clip(CircleShape)
-                  .background(if (isSelected) MaterialTheme.colorScheme.primary else ProfessionalBlue.copy(alpha = 0.15f)),
+                  .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
               ) {
-                Text(
-                  text = course.code.take(3),
-                  style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
-                  color = if (isSelected) MaterialTheme.colorScheme.onPrimary else ProfessionalBlue
+                Icon(
+                  Icons.Default.School,
+                  contentDescription = null,
+                  modifier = Modifier.size(32.dp),
+                  tint = MaterialTheme.colorScheme.primary
                 )
               }
-              Spacer(modifier = Modifier.width(8.dp))
-              Column {
-                Text(
-                  text = course.code,
-                  style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                  color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                  text = course.level,
-                  style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                  color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+              Spacer(modifier = Modifier.height(16.dp))
+              Text(
+                text = "No Courses for ${user.level} Yet",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+              )
+              Spacer(modifier = Modifier.height(8.dp))
+              Text(
+                text = "Departmental courses, study packs, and syllabus materials for ${user.level} have not been uploaded by administrators yet. When published, your course hubs and lecture materials will automatically appear here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+              )
+              Spacer(modifier = Modifier.height(20.dp))
+              Button(
+                onClick = {
+                  coroutineScope.launch {
+                    cloudSyncManager?.pullLatestFromCloud()
+                  }
+                },
+                shape = RoundedCornerShape(12.dp)
+              ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Sync & Check Updates")
               }
             }
           }
         }
-      }
-
-      Spacer(modifier = Modifier.height(6.dp))
-
-      // 3. Course Specific Sub-Tabs (Materials, Handouts, CBT/Quizzes, Drive Library, Syllabus)
-      ScrollableTabRow(
-        selectedTabIndex = selectedTab,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.primary,
-        edgePadding = 16.dp,
-        indicator = { tabPositions ->
-          TabRowDefaults.SecondaryIndicator(
-            modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-            color = MaterialTheme.colorScheme.primary
-          )
-        }
-      ) {
-        tabs.forEachIndexed { index, title ->
-          Tab(
-            selected = selectedTab == index,
-            onClick = { selectedTab = index },
-            text = {
-              Text(
-                text = title,
-                style = MaterialTheme.typography.labelMedium.copy(
-                  fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
-                ),
-                color = if (selectedTab == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-              )
-            }
-          )
-        }
-      }
-
-      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-      // 4. Tab Content Body
-      val currentCourse = activeCourse
-      if (currentCourse == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-          Text("No courses found. Please check back later.")
-        }
       } else {
-        LazyColumn(
+        // 2. Course Selection Carousel (RAD 101, PHY 101, BIO 101, etc.)
+        Text(
+          text = "Select Course Hub",
+          style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+          color = MaterialTheme.colorScheme.onBackground,
+          modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        )
+
+        LazyRow(
           modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-          verticalArrangement = Arrangement.spacedBy(14.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+          items(courses) { course ->
+            val isSelected = (course.id == (activeCourse?.id ?: -1L))
+            Surface(
+              onClick = {
+                selectedCourseId = course.id
+              },
+              shape = RoundedCornerShape(12.dp),
+              color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+              border = BorderStroke(
+                width = if (isSelected) 1.5.dp else 1.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+              ),
+              modifier = Modifier.height(48.dp)
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) MaterialTheme.colorScheme.primary else ProfessionalBlue.copy(alpha = 0.15f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = course.code.take(3),
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 9.sp),
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else ProfessionalBlue
+                  )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                  Text(
+                    text = course.code,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                  )
+                  Text(
+                    text = course.level,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                }
+              }
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // 3. Course Specific Sub-Tabs (Materials, Handouts, CBT/Quizzes, Drive Library, Syllabus)
+        ScrollableTabRow(
+          selectedTabIndex = selectedTab,
+          containerColor = MaterialTheme.colorScheme.surface,
+          contentColor = MaterialTheme.colorScheme.primary,
+          edgePadding = 16.dp,
+          indicator = { tabPositions ->
+            TabRowDefaults.SecondaryIndicator(
+              modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+              color = MaterialTheme.colorScheme.primary
+            )
+          }
+        ) {
+          tabs.forEachIndexed { index, title ->
+            Tab(
+              selected = selectedTab == index,
+              onClick = { selectedTab = index },
+              text = {
+                Text(
+                  text = title,
+                  style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                  ),
+                  color = if (selectedTab == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            )
+          }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+        // 4. Tab Content Body
+        val currentCourse = activeCourse
+        if (currentCourse != null) {
+          LazyColumn(
+            modifier = Modifier
+              .fillMaxSize()
+              .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+          ) {
           // Course Header Card
           item {
             Card(
@@ -720,8 +789,9 @@ fun CoursesScreen(
         }
       }
     }
+    }
   }
-  }
+}
 
   // Material Reader Bottom Sheet
   if (viewingMaterial != null) {

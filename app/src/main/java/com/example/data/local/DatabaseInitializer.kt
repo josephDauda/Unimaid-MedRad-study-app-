@@ -7,6 +7,7 @@ import com.example.data.local.entity.TopicEntity
 import com.example.data.local.entity.UniversityEntity
 import com.example.data.local.entity.UserEntity
 import com.example.data.util.PasswordSecurity
+import com.example.data.util.LevelClassifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -183,12 +184,21 @@ object DatabaseInitializer {
         )
       }
 
-      // 4. Meticulously correct existing students: Ensure students on ANA 201 are set to 200 Level
+      // 4. Meticulously preserve student academic levels:
+      // Normalize level string formatting without altering user-selected levels (100L - 600L).
+      // Never overwrite a student's chosen level on startup!
       try {
         val existingStudents = userDao.getAllUsersList()
         for (st in existingStudents) {
-          if (st.role == "STUDENT" && st.level.contains("100")) {
-            userDao.updateUser(st.copy(level = "200 Level"))
+          if (st.role == "STUDENT") {
+            if (st.level.isBlank()) {
+              userDao.updateUser(st.copy(level = "200 Level"))
+            } else {
+              val normalized = LevelClassifier.normalizeLevel(st.level)
+              if (normalized != st.level) {
+                userDao.updateUser(st.copy(level = normalized))
+              }
+            }
           }
         }
       } catch (_: Exception) {}

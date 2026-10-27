@@ -668,4 +668,78 @@ class ExampleRobolectricTest {
     assertEquals("Mid-Semester Assessment", exam?.title)
     assertEquals(convertedId, com.example.data.supabase.FlexibleIdHelper.toPositiveLong(exam?.courseId))
   }
+
+  @Test
+  fun `TEST T - Strict academic level isolation and concurrent exam independence`() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val container = com.example.data.MedradAppContainer.getInstance(context)
+
+    // User A: 500 Level student
+    val user500 = com.example.data.local.entity.UserEntity(
+      id = 5001L,
+      email = "student500@medrad.edu.ng",
+      fullName = "Khadija Usman",
+      level = "500 Level",
+      role = "STUDENT"
+    )
+
+    // User B: 200 Level student
+    val user200 = com.example.data.local.entity.UserEntity(
+      id = 2001L,
+      email = "student200@medrad.edu.ng",
+      fullName = "Ahmed Sani",
+      level = "200 Level",
+      role = "STUDENT"
+    )
+
+    // Verify LevelClassifier strictly differentiates
+    org.junit.Assert.assertFalse("500L student must not match ANA 201", com.example.data.util.LevelClassifier.matchesUserLevel(user500, "ANA 201", "200 Level"))
+    org.junit.Assert.assertTrue("200L student matches ANA 201", com.example.data.util.LevelClassifier.matchesUserLevel(user200, "ANA 201", "200 Level"))
+    org.junit.Assert.assertNull("Unresolved course code must return null level", com.example.data.util.LevelClassifier.getLevelFromCourseCode("UNKNOWN"))
+
+    // Insert 200L course & question
+    container.academicRepository.insertCourse(
+      com.example.data.local.entity.CourseEntity(
+        id = 201L,
+        departmentId = 1L,
+        code = "ANA 201",
+        title = "Gross Anatomy",
+        level = "200 Level",
+        semester = "First Semester"
+      )
+    )
+    container.academicRepository.insertQuestion(
+      com.example.data.local.entity.QuestionEntity(
+        id = 9001L,
+        courseId = 201L,
+        questionText = "What is the brachial plexus root value?",
+        optionA = "C5-T1",
+        optionB = "C3-C5",
+        optionC = "T1-T5",
+        optionD = "L1-S1",
+        correctAnswer = "A",
+        explanation = "C5-T1 form the brachial plexus",
+        isPublished = true
+      )
+    )
+
+    // When 500L requests exam questions from ANA 201 or fallback, it MUST return empty (no leakage)
+    val questionsFor500 = container.cbtRepository.getExamQuestions(
+      courseId = 201L,
+      totalQuestions = 10,
+      allowDepartmentalFallback = true,
+      studentLevel = "500 Level"
+    )
+    org.junit.Assert.assertTrue("500 Level student must receive 0 questions from 200 Level course pool", questionsFor500.isEmpty())
+
+    // When 200L requests exam questions from ANA 201, it receives the questions properly
+    val questionsFor200 = container.cbtRepository.getExamQuestions(
+      courseId = 201L,
+      totalQuestions = 10,
+      allowDepartmentalFallback = true,
+      studentLevel = "200 Level"
+    )
+    org.junit.Assert.assertTrue("200 Level student receives questions matching their level", questionsFor200.isNotEmpty())
+    assertEquals(9001L, questionsFor200.first().id)
+  }
 }

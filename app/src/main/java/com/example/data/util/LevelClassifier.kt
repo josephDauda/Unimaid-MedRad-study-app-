@@ -11,6 +11,7 @@ object LevelClassifier {
    *      "300", "300L", "Level 300", "3" -> "300 Level"
    *      "400", "400L", "Level 400", "4" -> "400 Level"
    *      "500", "500L", "Level 500", "5" -> "500 Level"
+   *      "600", "600L", "Level 600", "6" -> "600 Level"
    */
   fun normalizeLevel(raw: String?): String {
     if (raw.isNullOrBlank()) return "200 Level"
@@ -33,8 +34,8 @@ object LevelClassifier {
    *      "RAD 601" -> "600 Level"
    *      "RAD 701" -> "700 Level"
    */
-  fun getLevelFromCourseCode(courseCode: String?): String {
-    if (courseCode.isNullOrBlank()) return "200 Level"
+  fun getLevelFromCourseCode(courseCode: String?): String? {
+    if (courseCode.isNullOrBlank()) return null
     val clean = courseCode.trim().uppercase()
     val match = Regex("""([1-9])\d{2}""").find(clean)
     if (match != null) {
@@ -46,7 +47,7 @@ object LevelClassifier {
         return "${i}00 Level"
       }
     }
-    return "200 Level"
+    return null
   }
 
   /**
@@ -72,12 +73,13 @@ object LevelClassifier {
       if (assigned.isBlank() || assigned.equals("ALL", ignoreCase = true)) return true
       val assignedLevel = normalizeLevel(assigned)
       val targetLevel = explicitLevel?.let { normalizeLevel(it) } ?: getLevelFromCourseCode(courseCode)
-      return assignedLevel == targetLevel
+      return targetLevel != null && assignedLevel == targetLevel
     }
 
     // Student: strictly match their registered level
     val studentLevel = normalizeLevel(user.level)
     val targetLevel = explicitLevel?.let { normalizeLevel(it) } ?: getLevelFromCourseCode(courseCode)
+    if (targetLevel == null) return false
     return studentLevel == targetLevel
   }
 
@@ -92,6 +94,7 @@ object LevelClassifier {
     } else {
       getLevelFromCourseCode(itemCodeOrLevel)
     }
+    if (normItem == null) return false
     return normTarget == normItem
   }
 

@@ -709,7 +709,7 @@ fun DashboardScreen(
           val isMockActive = isMockCardLevelMatch || levelMatchingExams.isNotEmpty()
 
           if (isMockActive) {
-            val resolvedCourseId = if (isMockCardLevelMatch && mockCard.courseId > 0L) mockCard.courseId else (levelMatchingExams.firstOrNull()?.courseId ?: 1L)
+            val resolvedCourseId = if (isMockCardLevelMatch && mockCard.courseId > 0L) mockCard.courseId else (levelMatchingExams.firstOrNull()?.courseId ?: 0L)
             Surface(
               modifier = Modifier
                 .fillMaxWidth()
@@ -721,7 +721,7 @@ fun DashboardScreen(
                     ?: ExamEntity(
                       id = mockCard.examId.takeIf { it > 0 } ?: System.currentTimeMillis(),
                       courseId = resolvedCourseId,
-                      title = mockCard.examTitle.ifBlank { "${mockCard.courseCode.ifBlank { "ANA 201" }} Mock CBT" },
+                      title = mockCard.examTitle.ifBlank { "${mockCard.courseCode.ifBlank { "${user.level} CBT" }} Mock CBT" },
                       description = "Official departmental timed CBT examination simulation.",
                       durationMinutes = if (mockCard.durationMinutes > 0) mockCard.durationMinutes else 30,
                       totalQuestions = if (mockCard.questionCount > 0) mockCard.questionCount else 15,

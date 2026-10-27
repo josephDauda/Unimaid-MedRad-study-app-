@@ -719,7 +719,7 @@ fun AdminQuestionsView(
   val secondaryAdminLevel = if (!isPrimary) LevelClassifier.normalizeLevel(currentUser?.assignedCourses?.ifBlank { currentUser?.level }) else null
 
   var selectedLevelFilter by remember { mutableStateOf("All") }
-  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level")
 
   val baseQuestions = remember(questions, isPrimary, secondaryAdminLevel) {
     if (!isPrimary && secondaryAdminLevel != null) {
@@ -1057,7 +1057,7 @@ fun AdminMaterialsView(
   val secondaryAdminLevel = if (!isPrimary) LevelClassifier.normalizeLevel(currentUser?.assignedCourses?.ifBlank { currentUser?.level }) else null
 
   var selectedLevelFilter by remember { mutableStateOf("All") }
-  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level")
 
   val baseMaterials = remember(materials, isPrimary, secondaryAdminLevel) {
     if (!isPrimary && secondaryAdminLevel != null) {
@@ -1634,7 +1634,7 @@ fun AdminStudentsView(
 ) {
   var searchQuery by remember { mutableStateOf("") }
   var selectedLevelFilter by remember { mutableStateOf("All") }
-  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+  val levelOptions = listOf("All", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level")
 
   val isPrimary = currentUser == null ||
       currentUser.adminRole.equals("PRIMARY", ignoreCase = true) ||
@@ -2835,45 +2835,28 @@ fun AddSecondaryAdminDialog(
         Spacer(modifier = Modifier.height(8.dp))
         Text("Academic Level Assignment:", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
         Spacer(modifier = Modifier.height(4.dp))
-        val adminLevels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "All Levels")
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          adminLevels.take(3).forEach { lvl ->
-            val isSel = assignedCourses.contains(lvl, ignoreCase = true)
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-              modifier = Modifier.clickable { assignedCourses = lvl }
+        val adminLevels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level", "All Levels")
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          adminLevels.chunked(3).forEach { rowLevels ->
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-              Text(
-                text = lvl,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal),
-                color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-              )
-            }
-          }
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          adminLevels.drop(3).forEach { lvl ->
-            val isSel = assignedCourses.contains(lvl, ignoreCase = true)
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-              modifier = Modifier.clickable { assignedCourses = lvl }
-            ) {
-              Text(
-                text = lvl,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal),
-                color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-              )
+              rowLevels.forEach { lvl ->
+                val isSel = assignedCourses.contains(lvl, ignoreCase = true)
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                  modifier = Modifier.clickable { assignedCourses = lvl }
+                ) {
+                  Text(
+                    text = lvl,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal),
+                    color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                  )
+                }
+              }
             }
           }
         }

@@ -9,6 +9,8 @@ import com.example.data.local.entity.UserEntity
 import com.example.data.supabase.SupabaseClient
 import com.example.data.supabase.SupabaseProfile
 import com.example.data.util.PasswordSecurity
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -629,31 +631,56 @@ class AuthRepository(private val context: Context, private val database: AppData
       try {
         val user = database.userDao().getUserById(userId)
           ?: return@withContext Result.failure(Exception("User account not found."))
+        val normalizedLevel = if (!newLevel.isNullOrBlank()) com.example.data.util.LevelClassifier.normalizeLevel(newLevel) else user.level
         val updated = user.copy(
           fullName = newFullName.trim().ifEmpty { user.fullName },
           phoneNumber = newPhoneNumber.trim(),
-          level = if (!newLevel.isNullOrBlank()) com.example.data.util.LevelClassifier.normalizeLevel(newLevel) else user.level
+          level = normalizedLevel
         )
+        // 1. Immediately update Room database so it is saved locally on device
         database.userDao().updateUser(updated)
         _currentUser.value = updated
 
-        // Push updated profile to Supabase
-        scope.launch {
+        // 2. Synchronize to Supabase profiles using verified remote ID and direct PATCH
+        val userEmail = user.email.trim().lowercase()
+        try {
+          var existingProfileId: String? = null
+          val checkRes = supabaseClient.restGet("profiles?email=eq.$userEmail&limit=1")
+          val checkJson = checkRes.getOrNull() ?: "[]"
           try {
-            val profileDto = SupabaseProfile(
-              id = supabaseClient.getUserId() ?: java.util.UUID.nameUUIDFromBytes("supabase:${user.email}".toByteArray()).toString(),
-              fullName = updated.fullName,
-              email = updated.email,
-              level = updated.level,
-              department = updated.department,
-              faculty = updated.faculty,
-              appRole = updated.role
-            )
-            val json = supabaseClient.moshi.adapter(SupabaseProfile::class.java).toJson(profileDto)
-            supabaseClient.restPost("profiles", json, upsert = true)
-          } catch (e: Exception) {
-            Log.w(tag, "Supabase profile update notice: ${e.message}")
+            val arr = JSONArray(checkJson)
+            if (arr.length() > 0) {
+              existingProfileId = arr.getJSONObject(0).optString("id")
+            }
+          } catch (_: Exception) {}
+
+          val targetProfileId = existingProfileId
+            ?: supabaseClient.getUserId()
+            ?: com.example.data.supabase.FlexibleIdHelper.toUuidString(user.id, "user")
+
+          val profilePayload = JSONObject().apply {
+            put("id", targetProfileId)
+            put("email", userEmail)
+            put("full_name", updated.fullName)
+            put("matric_number", updated.phoneNumber)
+            put("level", updated.level)
+            put("department", updated.department)
+            put("faculty", updated.faculty)
+            put("app_role", if (updated.role == "ADMIN") "admin" else "student")
+            put("is_active", updated.isActive)
           }
+
+          val postRes = supabaseClient.restPost("profiles", profilePayload.toString(), upsert = true)
+          // Also execute direct patch by email to guarantee database row is updated
+          val patchObj = JSONObject().apply {
+            put("full_name", updated.fullName)
+            put("matric_number", updated.phoneNumber)
+            put("level", updated.level)
+          }
+          supabaseClient.restPatch("profiles?email=eq.$userEmail", patchObj.toString())
+          Log.i(tag, "Profile level updated in Supabase successfully: $userEmail -> ${updated.level} (upsert success=${postRes.isSuccess})")
+        } catch (e: Exception) {
+          Log.w(tag, "Supabase profile sync notice: ${e.message}")
         }
 
         Result.success(updated)

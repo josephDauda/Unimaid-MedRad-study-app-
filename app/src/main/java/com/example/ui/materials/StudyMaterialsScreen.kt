@@ -102,10 +102,14 @@ fun StudyMaterialsScreen(
   val allCourses by academicRepository.getAllCourses().collectAsState(initial = emptyList())
   val courseMap = remember(allCourses) { allCourses.associateBy { it.id } }
   val courses = remember(allCourses, user.level, user.role, user.adminRole) {
-    if (user.role == "ADMIN") allCourses
-    else {
-      val lf = allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
-      if (lf.isNotEmpty()) lf else allCourses
+    if (user.role == "ADMIN") {
+      val isPrimary = user.adminRole.equals("PRIMARY", ignoreCase = true) ||
+          user.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+          user.adminRole.isBlank()
+      if (isPrimary) allCourses
+      else allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
+    } else {
+      allCourses.filter { com.example.data.util.LevelClassifier.matchesUserLevel(user, it.code, it.level) }
     }
   }
 
@@ -119,7 +123,19 @@ fun StudyMaterialsScreen(
 
   val filteredMaterials = allMaterials.filter { mat ->
     val parentCourse = courseMap[mat.courseId]
-    val matchesLevel = user.role == "ADMIN" || com.example.data.util.LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level)
+    val matchesLevel = if (user.role == "ADMIN") {
+      val isPrimary = user.adminRole.equals("PRIMARY", ignoreCase = true) ||
+          user.email.equals("admin@medrad.edu.ng", ignoreCase = true) ||
+          user.adminRole.isBlank()
+      if (isPrimary) true
+      else com.example.data.util.LevelClassifier.matchesUserLevel(user, parentCourse?.code, parentCourse?.level ?: mat.title)
+    } else {
+      if (parentCourse != null) {
+        com.example.data.util.LevelClassifier.matchesUserLevel(user, parentCourse.code, parentCourse.level)
+      } else {
+        com.example.data.util.LevelClassifier.matchesUserLevel(user, null, mat.title)
+      }
+    }
     val matchesCourse = (selectedCourseId == null || mat.courseId == selectedCourseId)
     val matchesCategory = (selectedCategory == "All" || mat.contentType.equals(selectedCategory, ignoreCase = true))
     val matchesSearch = mat.title.contains(searchQuery, ignoreCase = true) ||

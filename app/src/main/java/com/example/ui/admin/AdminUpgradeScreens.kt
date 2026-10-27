@@ -321,7 +321,7 @@ fun AdminPushNotificationsView(
   var title by remember { mutableStateOf("") }
   var message by remember { mutableStateOf("") }
 
-  val targetOptions = listOf("All Students", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "ANA 201")
+  val targetOptions = listOf("All Students", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level", "ANA 201")
   var selectedTarget by remember { mutableStateOf(targetOptions.first()) }
   var targetExpanded by remember { mutableStateOf(false) }
 
@@ -959,7 +959,7 @@ fun AdminScoreExportView(
   val secondaryAdminLevel = if (!isPrimary) LevelClassifier.normalizeLevel(currentUser?.assignedCourses?.ifBlank { currentUser?.level }) else null
 
   var selectedLevelFilter by remember { mutableStateOf(if (!isPrimary && secondaryAdminLevel != null) secondaryAdminLevel else "All Levels") }
-  val levelOptions = listOf("All Levels", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+  val levelOptions = listOf("All Levels", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level")
 
   LaunchedEffect(Unit) {
     adminViewModel.syncAttemptsFromCloud()

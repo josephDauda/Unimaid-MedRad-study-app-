@@ -629,7 +629,7 @@ class NotificationRepository(
 
   private fun extractTargetFromTitleOrMessage(title: String, message: String): String {
     val text = "$title $message"
-    val levels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+    val levels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level")
     for (lvl in levels) {
       if (text.contains(lvl, ignoreCase = true)) return lvl
     }

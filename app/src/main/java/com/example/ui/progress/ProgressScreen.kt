@@ -778,7 +778,7 @@ fun ProgressScreen(
     }
   }
 
-  // DIALOG 1: Edit Profile (Allowed fields only: Full Name, Phone Number)
+  // DIALOG 1: Edit Profile (Allowed fields: Full Name, Phone Number, Academic Level)
   if (showEditProfileDialog) {
     EditProfileModal(
       user = user,
@@ -788,6 +788,15 @@ fun ProgressScreen(
           if (success) {
             userProfilePreferences.setCustomDisplayName(newName)
             authViewModel.refreshUser()
+            coroutineScope.launch {
+              cloudSyncManager?.broadcastProfile(
+                user.copy(
+                  fullName = newName,
+                  phoneNumber = newPhone,
+                  level = com.example.data.util.LevelClassifier.normalizeLevel(newLevel)
+                )
+              )
+            }
           }
         }
         showEditProfileDialog = false
@@ -962,7 +971,7 @@ fun EditProfileModal(
 ) {
   var name by remember { mutableStateOf(user.fullName) }
   var phone by remember { mutableStateOf(user.phoneNumber) }
-  val levels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level")
+  val levels = listOf("100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level")
   var selectedLevel by remember {
     mutableStateOf(
       if (user.level in levels) user.level

@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.example.data.local.entity.ExamAttemptEntity
 import com.example.data.local.entity.UserEntity
+import com.example.data.util.LevelClassifier
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -28,6 +29,7 @@ object ScoreSheetPdfGenerator {
     val name: String,
     val email: String,
     val level: String,
+    val status: String,
     val timeSpentStr: String,
     val score: Int,
     val total: Int,
@@ -94,11 +96,22 @@ object ScoreSheetPdfGenerator {
 
           val dateFormatted = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(att.timestamp))
 
+          val examStatus = when {
+            att.answersJson.contains("TERMINATED_APP_SWITCH") -> "Lockdown"
+            att.answersJson.contains("TIME_EXPIRED") -> "Time Exp"
+            att.totalQuestions > 0 -> "Completed"
+            else -> "Submitted"
+          }
+
+          val normLevel = LevelClassifier.normalizeLevel(studentLevel.ifBlank { student?.level ?: "200 Level" })
+          val shortLevel = normLevel.replace(" Level", "L")
+
           CandidateRow(
             sn = index + 1,
             name = studentName,
             email = studentEmail,
-            level = studentLevel.ifBlank { "200L" },
+            level = shortLevel,
+            status = examStatus,
             timeSpentStr = timeSpentFormatted,
             score = rawScore,
             total = total,
@@ -109,11 +122,13 @@ object ScoreSheetPdfGenerator {
         }
       } else if (studentsMap.isNotEmpty()) {
         studentsMap.values.mapIndexed { index, student ->
+          val normLevel = LevelClassifier.normalizeLevel(student.level.ifBlank { "200 Level" })
           CandidateRow(
             sn = index + 1,
             name = student.fullName.ifBlank { "Candidate #${student.id}" },
             email = student.email.ifBlank { student.phoneNumber.ifBlank { "ID #${student.id}" } },
-            level = student.level.ifBlank { "200L" },
+            level = normLevel.replace(" Level", "L"),
+            status = "Awaiting",
             timeSpentStr = "—",
             score = 0,
             total = 0,
@@ -198,7 +213,8 @@ object ScoreSheetPdfGenerator {
         textPaint.textSize = 9.5f
         textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textPaint.color = Color.rgb(15, 23, 42)
-        canvas.drawText("Course: $courseCode — $courseTitle", leftX, y, textPaint)
+        val detectedLevel = LevelClassifier.getLevelFromCourseCode(courseCode) ?: "Departmental Level"
+        canvas.drawText("Course: $courseCode — $courseTitle  •  $detectedLevel", leftX, y, textPaint)
 
         textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
         val dateGenerated = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()).format(Date())
@@ -223,13 +239,15 @@ object ScoreSheetPdfGenerator {
         fillPaint.color = Color.rgb(15, 34, 64) // Deep Navy Table Header
         canvas.drawRect(36f, y, pageWidth - 36f, y + rowHeight, fillPaint)
 
-        val colSN = 42f
-        val colName = 70f
-        val colEmail = 210f
-        val colTime = 350f
-        val colScore = 415f
-        val colPct = 465f
-        val colRemark = 510f
+        val colSN = 40f
+        val colName = 65f
+        val colEmail = 185f
+        val colLevel = 290f
+        val colStatus = 330f
+        val colTime = 390f
+        val colScore = 442f
+        val colPct = 490f
+        val colRemark = 525f
 
         textPaint.textSize = 8.5f
         textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
@@ -239,6 +257,8 @@ object ScoreSheetPdfGenerator {
         canvas.drawText("S/N", colSN, textBaselineY, textPaint)
         canvas.drawText("CANDIDATE NAME", colName, textBaselineY, textPaint)
         canvas.drawText("EMAIL / ID", colEmail, textBaselineY, textPaint)
+        canvas.drawText("LEVEL", colLevel, textBaselineY, textPaint)
+        canvas.drawText("STATUS", colStatus, textBaselineY, textPaint)
         canvas.drawText("TIME", colTime, textBaselineY, textPaint)
         canvas.drawText("SCORE", colScore, textBaselineY, textPaint)
         canvas.drawText("%", colPct, textBaselineY, textPaint)
@@ -277,22 +297,39 @@ object ScoreSheetPdfGenerator {
             canvas.drawText("${cand.sn}", colSN, rowTextY, textPaint)
 
             // Name (truncated if too long)
-            val nameDisplay = if (cand.name.length > 25) cand.name.substring(0, 23) + ".." else cand.name
+            val nameDisplay = if (cand.name.length > 20) cand.name.substring(0, 18) + ".." else cand.name
             textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             canvas.drawText(nameDisplay, colName, rowTextY, textPaint)
 
             // Email / ID
             textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
             textPaint.color = Color.rgb(71, 85, 105)
-            val emailDisplay = if (cand.email.length > 24) cand.email.substring(0, 22) + ".." else cand.email
+            val emailDisplay = if (cand.email.length > 18) cand.email.substring(0, 16) + ".." else cand.email
             canvas.drawText(emailDisplay, colEmail, rowTextY, textPaint)
 
+            // Level
+            textPaint.color = Color.rgb(15, 23, 42)
+            canvas.drawText(cand.level, colLevel, rowTextY, textPaint)
+
+            // Status
+            val statusColor = when (cand.status) {
+              "Lockdown" -> Color.rgb(185, 28, 28)
+              "Time Exp" -> Color.rgb(194, 65, 12)
+              "Completed" -> Color.rgb(22, 101, 52)
+              else -> Color.rgb(71, 85, 105)
+            }
+            textPaint.color = statusColor
+            textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText(cand.status, colStatus, rowTextY, textPaint)
+
             // Time Spent
+            textPaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            textPaint.color = Color.rgb(71, 85, 105)
             canvas.drawText(cand.timeSpentStr, colTime, rowTextY, textPaint)
 
             // Score
             textPaint.color = Color.rgb(15, 23, 42)
-            val scoreDisplay = if (cand.total > 0) "${cand.score}/${cand.total}" else "Pending"
+            val scoreDisplay = if (cand.total > 0) "${cand.score}/${cand.total}" else "—"
             canvas.drawText(scoreDisplay, colScore, rowTextY, textPaint)
 
             // Percentage

@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.data.util.LevelClassifier
 
 class CbtRepository(
   private val database: AppDatabase,
@@ -83,8 +84,20 @@ class CbtRepository(
     }
   }
 
-  suspend fun getPracticeQuestions(courseId: Long, limit: Int = 15): List<QuestionEntity> {
+  suspend fun getPracticeQuestions(
+    courseId: Long,
+    limit: Int = 15,
+    studentLevel: String? = null
+  ): List<QuestionEntity> {
     return withContext(Dispatchers.IO) {
+      if (!studentLevel.isNullOrBlank()) {
+        val course = database.academicDao().getCourseById(courseId)
+        if (course != null) {
+          if (!LevelClassifier.matchesLevel(studentLevel, course.code.ifBlank { course.level })) {
+            return@withContext emptyList<QuestionEntity>()
+          }
+        }
+      }
       val questions = questionDao.getPublishedQuestionsForCourseList(courseId)
       questions.shuffled().take(limit)
     }
@@ -94,9 +107,12 @@ class CbtRepository(
     courseId: Long,
     totalQuestions: Int,
     examRemoteId: String? = null,
-    allowDepartmentalFallback: Boolean = false
+    allowDepartmentalFallback: Boolean = false,
+    studentLevel: String? = null
   ): List<QuestionEntity> {
     return withContext(Dispatchers.IO) {
+      val allCourses = database.academicDao().getCoursesList().associateBy { it.id }
+
       val specificExamQuestions = if (!examRemoteId.isNullOrBlank()) {
         questionDao.getQuestionsByRemoteExamId(examRemoteId).filter { it.isPublished }
       } else emptyList()
@@ -104,10 +120,30 @@ class CbtRepository(
       val courseQuestions = questionDao.getPublishedQuestionsForCourseList(courseId)
       val basePool = (specificExamQuestions + courseQuestions).distinctBy { it.id }.toMutableList()
 
+      // Strictly purge any question that does not match candidate's level
+      if (!studentLevel.isNullOrBlank()) {
+        basePool.retainAll { q ->
+          val qCourse = allCourses[q.courseId]
+          val courseCode = qCourse?.code
+          val courseLvl = qCourse?.level
+          LevelClassifier.matchesLevel(studentLevel, courseCode ?: courseLvl)
+        }
+      }
+
       if (basePool.size < totalQuestions && (allowDepartmentalFallback || courseId == 9999L)) {
         val extra = questionDao.getAllQuestionsList().filter { it.isPublished }
+
         for (q in extra) {
           if (!basePool.any { it.id == q.id }) {
+            // Strictly check academic level to prevent question leakage across levels
+            if (!studentLevel.isNullOrBlank()) {
+              val qCourse = allCourses[q.courseId]
+              val courseCode = qCourse?.code
+              val courseLvl = qCourse?.level
+              if (!LevelClassifier.matchesLevel(studentLevel, courseCode ?: courseLvl)) {
+                continue
+              }
+            }
             basePool.add(q)
             if (basePool.size >= totalQuestions) break
           }
@@ -311,6 +347,31 @@ class CbtRepository(
   suspend fun getUserAttemptsList(userId: Long, limit: Int = 10): List<ExamAttemptEntity> {
     return withContext(Dispatchers.IO) {
       examDao.getRecentAttempts(userId, limit)
+    }
+  }
+
+  suspend fun getExistingAttemptForUserAndExam(
+    userId: Long,
+    examId: Long?,
+    examTitle: String,
+    courseCode: String? = null
+  ): ExamAttemptEntity? {
+    return withContext(Dispatchers.IO) {
+      // 1. Direct match by examId if available
+      if (examId != null && examId > 0) {
+        val attempt = examDao.getAttemptByUserIdAndExamId(userId, examId)
+        if (attempt != null) return@withContext attempt
+      }
+      // 2. Match by title or course code among recent user attempts
+      val userAttempts = examDao.getAttemptsForUserList(userId)
+      userAttempts.firstOrNull { attempt ->
+        (examId != null && attempt.examId == examId) ||
+        (attempt.examTitle.isNotBlank() && attempt.examTitle.equals(examTitle, ignoreCase = true)) ||
+        (!courseCode.isNullOrBlank() && (
+          attempt.examTitle.contains(courseCode, ignoreCase = true) ||
+          attempt.courseTitle.contains(courseCode, ignoreCase = true)
+        ))
+      }
     }
   }
 }

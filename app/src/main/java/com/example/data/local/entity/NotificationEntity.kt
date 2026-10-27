@@ -18,7 +18,7 @@ data class NotificationEntity(
   val message: String,
   val category: String = "General", // "General Announcement", "Exam Alert", "Lecture Update", "Assignment / Practical", "Urgent Notice"
   val priority: String = "Normal", // "Normal", "Urgent", "Exam Alert"
-  val target: String = "All Students", // "All Students", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "RAD 101", etc.
+  val target: String = "All Students", // "All Students", "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level", "ANA 201", etc.
   val author: String = "Department of Medical Radiography",
   val senderId: String? = null,
   val recipientId: String? = null, // null for broadcast, student UUID for direct targeted notification
